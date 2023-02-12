@@ -5,7 +5,7 @@ from sklearn.neural_network import MLPClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.tree import DecisionTreeClassifier
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import RandomForestClassifier, ExtraTreesClassifier
 from sklearn.svm import SVC
 from sklearn.feature_selection import SelectFromModel, SelectKBest, SequentialFeatureSelector
 import pickle as pkl
@@ -20,7 +20,7 @@ def main():
     # Set the parameters
     SOLVE_IMB = True # Solve class imbalance problem
     SMOTE = True
-    CROSS_VAL = False
+    CROSS_VAL = True
 
     # MODEL TYPE = {
     #   MLP Classifier
@@ -85,7 +85,28 @@ def main():
     # Data standardization | normalization
     scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train)
+    X_train_scaled = pd.DataFrame(X_train_scaled, columns=X.columns)
     X_test_scaled = scaler.transform(X_test)
+    X_test_scaled = pd.DataFrame(X_test_scaled, columns=X.columns)
+
+    # Feature selection
+    feat_select_model  = ExtraTreesClassifier(n_estimators=10)
+    feat_select_model.fit(X_train_scaled, y_train)
+    
+    plt.figure()
+    feat_importances = pd.Series(feat_select_model.feature_importances_, index=X.columns)
+    feat_importances.nlargest(50).plot(kind='barh')
+    plt.show()
+
+    plt.figure()
+    plt.plot(sorted(feat_select_model.feature_importances_))
+    plt.show()
+
+    selected_feat = dict(feat_importances.sort_values()[-500:]).keys()
+
+    X_train_scaled_selected = X_train_scaled[selected_feat]
+    X_test_scaled_selected = X_test_scaled[selected_feat]
+
 
     # Define a model
     if MODEL_TYPE == 'MLP Classifier': 
@@ -122,8 +143,8 @@ def main():
                                 cv=5, verbose=5)
 
     # Train and test
-    model = classifier.fit(X_train_scaled, y_train)
-    pred = model.predict(X_test_scaled)
+    model = classifier.fit(X_train_scaled_selected, y_train)
+    pred = model.predict(X_test_scaled_selected)
 
     precision = precision_score(pred, y_test, average='weighted')
     recall = recall_score(pred, y_test, average='weighted')
@@ -132,14 +153,15 @@ def main():
     conf_mat = confusion_matrix(y_test, pred)
     df = pd.DataFrame(conf_mat, index = [i for i in le.classes_], columns = [i for i in le.classes_])
     sns.heatmap(df.div(df.values.sum()), annot=True)
+    plt.show()
 
     # Feature selection
-    selection_model = SelectFromModel(classifier, prefit=True)
-    X_new = selection_model.transform(X_train_scaled)
-    selected_feat_idx = selection_model.get_support()
-    selected_features = X_train.columns[selected_feat_idx]
+    #selection_model = SelectFromModel(classifier, prefit=True)
+    #X_new = selection_model.transform(X_train_scaled)
+    #selected_feat_idx = selection_model.get_support()
+    #selected_features = X_train.columns[selected_feat_idx]
 
-    print('After selection there is: {} genes!\nBefore selection we had {} genes!'.format(selected_features.shape[0], X.shape[1]))
+    #print('After selection there is: {} genes!\nBefore selection we had {} genes!'.format(selected_features.shape[0], X.shape[1]))
 
     time.sleep(2)
 
