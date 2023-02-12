@@ -1,4 +1,4 @@
-from sklearn.preprocessing import MinMaxScaler, LabelEncoder, StandardScaler
+from sklearn.preprocessing import MinMaxScaler, LabelEncoder, StandardScaler, LabelBinarizer
 from sklearn.metrics import accuracy_score, confusion_matrix, f1_score, precision_score, recall_score, log_loss
 from sklearn.model_selection import train_test_split, cross_val_score, GridSearchCV
 from sklearn.neural_network import MLPClassifier
@@ -31,7 +31,7 @@ def main():
     #   Random Forest
     #   }
 
-    MODEL_TYPE = 'Logistic Regression'
+    MODEL_TYPE = 'MLP Classifier'
 
     # Load the dataset
     DATASET_PATH = "tcga_brca_raw_19036_1053samples.pkl"
@@ -78,9 +78,9 @@ def main():
     y_train = balanced_dataset.expert_PAM50_subtype
     
     # Encode the class labels
-    le = LabelEncoder()
-    y_train = le.fit_transform(y_train)
-    y_test = le.transform(y_test)
+    LB = LabelBinarizer()
+    y_train = LB.fit_transform(y_train)
+    y_test = LB.transform(y_test)
 
     # Data standardization | normalization
     scaler = StandardScaler()
@@ -145,6 +145,7 @@ def main():
     # Train and test
     model = classifier.fit(X_train_scaled_selected, y_train)
     pred = model.predict(X_test_scaled_selected)
+    prob_pred = model.predict_proba(X_test_scaled_selected)
 
     precision = precision_score(pred, y_test, average='weighted')
     recall = recall_score(pred, y_test, average='weighted')
