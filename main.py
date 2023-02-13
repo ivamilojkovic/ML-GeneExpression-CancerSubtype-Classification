@@ -1,5 +1,5 @@
 from sklearn.preprocessing import MinMaxScaler, LabelEncoder, StandardScaler, LabelBinarizer
-from sklearn.metrics import accuracy_score, confusion_matrix, f1_score, precision_score, recall_score, log_loss
+from sklearn.metrics import accuracy_score, confusion_matrix, f1_score, precision_score, recall_score, log_loss, jaccard_score
 from sklearn.model_selection import train_test_split, cross_val_score, GridSearchCV
 from sklearn.neural_network import MLPClassifier
 from sklearn.linear_model import LogisticRegression
@@ -8,19 +8,24 @@ from sklearn.tree import DecisionTreeClassifier
 from sklearn.ensemble import RandomForestClassifier, ExtraTreesClassifier
 from sklearn.svm import SVC
 from sklearn.feature_selection import SelectFromModel, SelectKBest, SequentialFeatureSelector
+from sklearn.multiclass import OneVsOneClassifier, OneVsRestClassifier
+from sklearn.multioutput import ClassifierChain
+
 import pickle as pkl
 from data_preprocessing import ClassBalance
 import matplotlib.pyplot as plt
 import time
 import seaborn as sns
 import pandas as pd
+import numpy as np
 
 def main():
 
     # Set the parameters
     SOLVE_IMB = True # Solve class imbalance problem
     SMOTE = True
-    CROSS_VAL = True
+    CROSS_VAL = False
+    MULTI_LABEL = True
 
     # MODEL TYPE = {
     #   MLP Classifier
@@ -31,7 +36,7 @@ def main():
     #   Random Forest
     #   }
 
-    MODEL_TYPE = 'MLP Classifier'
+    MODEL_TYPE = 'Logistic Regression'
 
     # Load the dataset
     DATASET_PATH = "tcga_brca_raw_19036_1053samples.pkl"
@@ -142,19 +147,82 @@ def main():
                                 scoring='neg_log_loss', 
                                 cv=5, verbose=5)
 
+    if MULTI_LABEL:
+        # Use multi-label classifier to wrap the base classifier 
+        classifier = OneVsRestClassifier(estimator=classifier)
+
     # Train and test
     model = classifier.fit(X_train_scaled_selected, y_train)
     pred = model.predict(X_test_scaled_selected)
     prob_pred = model.predict_proba(X_test_scaled_selected)
-
+    
+    jacc_score = jaccard_score(pred, y_test, average='samples')
     precision = precision_score(pred, y_test, average='weighted')
     recall = recall_score(pred, y_test, average='weighted')
     print('Score test: ', precision, recall)
 
-    conf_mat = confusion_matrix(y_test, pred)
-    df = pd.DataFrame(conf_mat, index = [i for i in le.classes_], columns = [i for i in le.classes_])
-    sns.heatmap(df.div(df.values.sum()), annot=True)
-    plt.show()
+    if not MULTI_LABEL:
+        conf_mat = confusion_matrix(y_test, pred, )
+        df = pd.DataFrame(conf_mat, index = [i for i in LB.classes_], columns = [i for i in LB.classes_])
+        sns.heatmap(df.div(df.values.sum()), annot=True)
+        plt.show()
+
+    if MULTI_LABEL:
+
+        # Fit an ensemble of selected classifier chains and 
+        # compute the average prediction of all the chains.
+
+        chains = [ClassifierChain(classifier, order='random', random_state=i) for i in range(10)]
+        chain_preds = []
+        for chain in chains:
+            chain.fit(X_train_scaled_selected, y_train)
+            chain_preds.append(chain.predict(X_test_scaled_selected))
+
+        chain_preds = np.array(chain_preds)
+        chain_jaccard_scores = [
+            jaccard_score(y_pred >=0.5, y_test, average='samples') for y_pred in chain_preds
+        ]
+
+        y_pred_avg = chain_preds.mean(axis=0)
+        avg_jaccard_score = jaccard_score(y_test, y_pred_avg >=0.5, average='samples')
+
+        model_scores = [jacc_score] + chain_jaccard_scores + [avg_jaccard_score]
+
+        ### PLOT
+        model_names = (
+            "Independent",
+            "Chain 1",
+            "Chain 2",
+            "Chain 3",
+            "Chain 4",
+            "Chain 5",
+            "Chain 6",
+            "Chain 7",
+            "Chain 8",
+            "Chain 9",
+            "Chain 10",
+            "Ensemble",
+        )
+
+        x_pos = np.arange(len(model_names))
+
+        # Plot the Jaccard similarity scores for the independent model, each of the
+        # chains, and the ensemble (note that the vertical axis on this plot does
+        # not begin at 0).
+
+        fig, ax = plt.subplots(figsize=(7, 4))
+        ax.grid(True)
+        ax.set_title("Classifier Chain Ensemble Performance Comparison")
+        ax.set_xticks(x_pos)
+        ax.set_xticklabels(model_names, rotation="vertical")
+        ax.set_ylabel("Jaccard Similarity Score")
+        ax.set_ylim([min(model_scores) * 0.9, max(model_scores) * 1.1])
+        colors = ["r"] + ["b"] * len(chain_jaccard_scores) + ["g"]
+        ax.bar(x_pos, model_scores, alpha=0.5, color=colors)
+        plt.tight_layout()
+        plt.show()
+
+
 
     # Feature selection
     #selection_model = SelectFromModel(classifier, prefit=True)
