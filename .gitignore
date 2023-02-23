@@ -1,0 +1,9 @@
+# Folders to ignore
+/images
+/experiments
+/__pycache__
+/.ipynb_checkpoints
+
+# Ignore dataset
+*.pkl
+
