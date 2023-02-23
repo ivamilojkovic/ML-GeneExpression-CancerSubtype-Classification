@@ -1,15 +1,17 @@
 from sklearn.preprocessing import MinMaxScaler, LabelEncoder, StandardScaler, LabelBinarizer
-from sklearn.metrics import accuracy_score, confusion_matrix, f1_score, precision_score, recall_score, log_loss, jaccard_score
-from sklearn.model_selection import train_test_split, cross_val_score, GridSearchCV
+from sklearn.metrics import accuracy_score, confusion_matrix, f1_score, precision_score, recall_score, log_loss, jaccard_score, hamming_loss
+from sklearn.model_selection import train_test_split, cross_val_score, GridSearchCV, KFold
 from sklearn.neural_network import MLPClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.ensemble import RandomForestClassifier, ExtraTreesClassifier
 from sklearn.svm import SVC
-from sklearn.feature_selection import SelectFromModel, SelectKBest, SequentialFeatureSelector
+from sklearn.feature_selection import SelectFromModel, SelectKBest, RFE, f_classif, chi2
 from sklearn.multiclass import OneVsOneClassifier, OneVsRestClassifier
 from sklearn.multioutput import ClassifierChain
+import json, os
+import datetime
 
 import pickle as pkl
 from data_preprocessing import ClassBalance
@@ -21,11 +23,33 @@ import numpy as np
 
 def main():
 
+    EXP_PATH = 'experiments'
+
     # Set the parameters
     SOLVE_IMB = True # Solve class imbalance problem
     SMOTE = True
     CROSS_VAL = False
-    MULTI_LABEL = True
+    MULTI_LABEL = False
+    N_folds = 5
+    N_feats = 500
+    TEST_SIZE = 0.3
+
+    # Feature selection can be: Univariate, Recursive...
+    FEAT_SELECT = 'Recursive' 
+
+    # Get the current date and time
+    now = datetime.datetime.now()
+    experiment_name =  'run_' + now.strftime("%d-%m-%Y_%H:%M:%S")
+    experiment_params = {
+        'solve_ibm': SOLVE_IMB,
+        'use_smote': SMOTE,
+        'cross_validation': CROSS_VAL,
+        'multi_label_classification': MULTI_LABEL,
+        'n_folds': N_folds,
+        'n_features_to_select': N_feats,
+        'test_size': TEST_SIZE,
+        'feature_selection_method': FEAT_SELECT
+    }
 
     # MODEL TYPE = {
     #   MLP Classifier
@@ -36,7 +60,27 @@ def main():
     #   Random Forest
     #   }
 
-    MODEL_TYPE = 'Logistic Regression'
+    MODEL_TYPE = 'KNN'
+
+    MODEL_PARAMS = {
+        'Logistic Regression': {
+            'penalty': 'l2', 
+            'tol': 1e-3,
+            'random_state':4,
+            'solver':'lbfgs',
+            'max_iter':1000
+        },
+        'KNN': {
+            'n_neighbors':5, 
+            'weights':'uniform', 
+            'leaf_size':30, 
+            'metric':'minkowski'
+        } 
+
+    }
+
+    experiment_params['model_type'] = MODEL_TYPE
+    experiment_params['model_params'] = MODEL_PARAMS[MODEL_TYPE]
 
     # Load the dataset
     DATASET_PATH = "tcga_brca_raw_19036_1053samples.pkl"
@@ -48,7 +92,7 @@ def main():
     y = dataset.expert_PAM50_subtype
 
     # Split the dataset
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=1, 
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=TEST_SIZE, random_state=1, 
                                                         shuffle=True, stratify=y)                  
     ax = y_train.value_counts().plot(kind='bar', title='Class label before')
 
@@ -65,6 +109,7 @@ def main():
             'Normal': 50
         }
         balanced_dataset = cb.resampling(balance_treshs)
+        experiment_params['class_balance_thresholds'] = balance_treshs
 
     elif SOLVE_IMB and SMOTE:
 
@@ -75,17 +120,24 @@ def main():
             'Her2': 100,
             'Normal': 80
         }
-
+        
         balanced_dataset = cb.resampling_with_generation(sampling_strategy)
+        experiment_params['class_balance_thresholds'] = sampling_strategy
 
     ax = balanced_dataset.expert_PAM50_subtype.value_counts().plot(kind='bar', title='Class label after')
     X_train = balanced_dataset.drop(columns='expert_PAM50_subtype', inplace=False)
     y_train = balanced_dataset.expert_PAM50_subtype
     
     # Encode the class labels
-    LB = LabelBinarizer()
-    y_train = LB.fit_transform(y_train)
-    y_test = LB.transform(y_test)
+    if MULTI_LABEL:
+        LB = LabelBinarizer()
+        y_train = LB.fit_transform(y_train)
+        y_test = LB.transform(y_test)
+    else:
+        LB = LabelEncoder()
+        y_train = LB.fit_transform(y_train)
+        y_test = LB.transform(y_test)
+
 
     # Data standardization | normalization
     scaler = StandardScaler()
@@ -95,32 +147,55 @@ def main():
     X_test_scaled = pd.DataFrame(X_test_scaled, columns=X.columns)
 
     # Feature selection
-    feat_select_model  = ExtraTreesClassifier(n_estimators=10)
-    feat_select_model.fit(X_train_scaled, y_train)
-    
-    plt.figure()
-    feat_importances = pd.Series(feat_select_model.feature_importances_, index=X.columns)
-    feat_importances.nlargest(50).plot(kind='barh')
-    plt.show()
+    if FEAT_SELECT == 'Univariate':
+        best_feat_model = SelectKBest(score_func=f_classif, k=N_feats) # k needs to be defined
+        best_feat_model.fit(X_train_scaled, y_train)
+        df_scores = pd.DataFrame(best_feat_model.scores_)
+        df_feats = pd.DataFrame(X.columns)
 
-    plt.figure()
-    plt.plot(sorted(feat_select_model.feature_importances_))
-    plt.show()
+        featureScores = pd.concat([df_feats, df_scores],axis=1)
+        featureScores.columns = ['Feature', 'Score'] 
+        
+        plt.figure()
+        featureScores.nlargest(50, 'Score').plot(kind='barh')
+        plt.title(FEAT_SELECT + ' feature selection')
+        print(featureScores.nlargest(10, 'Score'))
 
-    selected_feat = dict(feat_importances.sort_values()[-500:]).keys()
+        selected_feat = featureScores.sort_values(by='Score')[-N_feats:]
 
+    elif FEAT_SELECT == 'Recursive':
+        rfe_selector = RFE(estimator=LogisticRegression(), n_features_to_select=N_feats, step=10, verbose=5)
+        rfe_selector.fit(X_train_scaled, y_train)
+        rfe_support = rfe_selector.get_support()
+
+        selected_feat = X.loc[:,rfe_support].columns.tolist()
+        print(str(len(selected_feat)), 'selected features')
+
+    else:
+        best_feat_model  = ExtraTreesClassifier(n_estimators=10)
+        best_feat_model.fit(X_train_scaled, y_train)
+        
+        plt.figure()
+        feat_importances = pd.Series(best_feat_model.feature_importances_, index=X.columns)
+        feat_importances.nlargest(50).plot(kind='barh')
+
+        plt.figure()
+        plt.plot(sorted(best_feat_model.feature_importances_))
+        plt.title(FEAT_SELECT + ' feature selection')
+
+        selected_feat = dict(feat_importances.sort_values()[-N_feats:]).keys()
+
+    # Extract the data frames with only selected features
     X_train_scaled_selected = X_train_scaled[selected_feat]
     X_test_scaled_selected = X_test_scaled[selected_feat]
-
 
     # Define a model
     if MODEL_TYPE == 'MLP Classifier': 
         classifier = MLPClassifier(hidden_layer_sizes=(20, 10, 5),
-                                solver='lbfgs', random_state=4, 
-                                alpha=1e-4, batch_size=5)
+                                   solver='lbfgs', random_state=4, 
+                                   alpha=1e-4, batch_size=5)
     elif MODEL_TYPE == 'Logistic Regression':
-        classifier = LogisticRegression(penalty='l2', tol=1e-3, random_state=4,
-                                        solver='lbfgs', max_iter = 1000)
+        classifier = LogisticRegression(**MODEL_PARAMS[MODEL_TYPE])
     elif MODEL_TYPE == 'KNN':
         classifier = KNeighborsClassifier(n_neighbors=5, weights='uniform', 
                                           leaf_size=30, metric='minkowski')
@@ -142,30 +217,52 @@ def main():
         exit()
 
     # Cross-validation to see if there is overfitting
-    if CROSS_VAL:
+    if CROSS_VAL and not MULTI_LABEL:
         scores = cross_val_score(classifier, X_train_scaled, y_train,
-                                scoring='neg_log_loss', 
-                                cv=5, verbose=5)
+                                 scoring='neg_log_loss', 
+                                 cv=N_folds, verbose=5)
 
     if MULTI_LABEL:
         # Use multi-label classifier to wrap the base classifier 
         classifier = OneVsRestClassifier(estimator=classifier)
+        if CROSS_VAL:
+            scores = cross_val_score(classifier, X_train_scaled, y_train,
+                                 scoring='f1_samples', 
+                                 cv=N_folds, verbose=5)
+            experiment_params['cross_val_scores'] = scores
+            print(scores)
 
     # Train and test
+    start = time.time()
     model = classifier.fit(X_train_scaled_selected, y_train)
+    stop = time.time()
+
+    experiment_params['training_time'] =  stop-start
+
     pred = model.predict(X_test_scaled_selected)
     prob_pred = model.predict_proba(X_test_scaled_selected)
-    
-    jacc_score = jaccard_score(pred, y_test, average='samples')
+
     precision = precision_score(pred, y_test, average='weighted')
     recall = recall_score(pred, y_test, average='weighted')
     print('Score test: ', precision, recall)
 
+    experiment_params['results'] = {
+        'precision': precision,
+        'recall': recall
+    }
+
     if not MULTI_LABEL:
-        conf_mat = confusion_matrix(y_test, pred, )
+        conf_mat = confusion_matrix(y_test, pred)        
+        #experiment_params['results']['confusion_matrix'] = conf_mat
+
         df = pd.DataFrame(conf_mat, index = [i for i in LB.classes_], columns = [i for i in LB.classes_])
         sns.heatmap(df.div(df.values.sum()), annot=True)
         plt.show()
+
+    else:
+        jacc_score = jaccard_score(pred, y_test, average='samples')
+        experiment_params['results']['jaccard_score'] = jacc_score
+        
 
     if MULTI_LABEL:
 
@@ -187,6 +284,7 @@ def main():
         avg_jaccard_score = jaccard_score(y_test, y_pred_avg >=0.5, average='samples')
 
         model_scores = [jacc_score] + chain_jaccard_scores + [avg_jaccard_score]
+        experiment_params['results']['chain_scores'] = model_scores
 
         ### PLOT
         model_names = (
@@ -222,8 +320,6 @@ def main():
         plt.tight_layout()
         plt.show()
 
-
-
     # Feature selection
     #selection_model = SelectFromModel(classifier, prefit=True)
     #X_new = selection_model.transform(X_train_scaled)
@@ -231,6 +327,11 @@ def main():
     #selected_features = X_train.columns[selected_feat_idx]
 
     #print('After selection there is: {} genes!\nBefore selection we had {} genes!'.format(selected_features.shape[0], X.shape[1]))
+
+
+    # Save the experiment properties as .json file
+    with open(os.path.join(EXP_PATH, experiment_name + '.json'), 'w') as file:
+        json.dump(experiment_params, file)
 
     time.sleep(2)
 
