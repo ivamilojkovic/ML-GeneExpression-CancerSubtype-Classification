@@ -10,7 +10,7 @@ from sklearn.svm import SVC
 from sklearn.feature_selection import SelectFromModel, SelectKBest, RFE, f_classif, chi2
 from sklearn.multiclass import OneVsOneClassifier, OneVsRestClassifier
 from sklearn.multioutput import ClassifierChain
-import json, os
+import json, os, pickle
 import datetime
 
 import pickle as pkl
@@ -20,22 +20,23 @@ import time
 import seaborn as sns
 import pandas as pd
 import numpy as np
+from utils import cmp_metrics
 
 def main():
 
     EXP_PATH = 'experiments'
 
     # Set the parameters
-    SOLVE_IMB = True # Solve class imbalance problem
+    SOLVE_IMB = False # Solve class imbalance problem
     SMOTE = True
     CROSS_VAL = False
     MULTI_LABEL = False
-    N_folds = 5
+    N_folds = 10
     N_feats = 500
     TEST_SIZE = 0.3
 
     # Feature selection can be: Univariate, Recursive...
-    FEAT_SELECT = 'Recursive' 
+    FEAT_SELECT = 'Univariate' 
 
     # Get the current date and time
     now = datetime.datetime.now()
@@ -60,7 +61,7 @@ def main():
     #   Random Forest
     #   }
 
-    MODEL_TYPE = 'KNN'
+    MODEL_TYPE = 'Logistic Regression'
 
     MODEL_PARAMS = {
         'Logistic Regression': {
@@ -97,36 +98,41 @@ def main():
     ax = y_train.value_counts().plot(kind='bar', title='Class label before')
 
     # Solve data imbalance issue
-    cb = ClassBalance(X=X_train, y=y_train)
+    if SOLVE_IMB:
+        cb = ClassBalance(X=X_train, y=y_train)
 
-    if SOLVE_IMB and not SMOTE:
-        
-        balance_treshs = {
-            'LumA': 100,
-            'LumB': 100,
-            'Basal': 100,
-            'Her2': 80,
-            'Normal': 50
-        }
-        balanced_dataset = cb.resampling(balance_treshs)
-        experiment_params['class_balance_thresholds'] = balance_treshs
+        if not SMOTE:
+            balance_treshs = {
+                'LumA': 100,
+                'LumB': 100,
+                'Basal': 100,
+                'Her2': 80,
+                'Normal': 50
+            }
+            balanced_dataset = cb.resampling(balance_treshs)
+            experiment_params['class_balance_thresholds'] = balance_treshs
 
-    elif SOLVE_IMB and SMOTE:
+        else:
+            class_counts = y.value_counts()
+            mul = 1.5 # Increase with 50% 
+            new_class_counts = round(class_counts*mul)
 
-        sampling_strategy = {
-            'LumA': 150,
-            'LumB': 150,
-            'Basal': 120,
-            'Her2': 100,
-            'Normal': 80
-        }
-        
-        balanced_dataset = cb.resampling_with_generation(sampling_strategy)
-        experiment_params['class_balance_thresholds'] = sampling_strategy
+            sampling_strategy = {
+                'LumA': int(new_class_counts['LumA']),
+                'LumB': int(new_class_counts['LumB']),
+                'Basal': int(new_class_counts['Basal']),
+                'Her2': int(new_class_counts['Her2']),
+                'Normal': int(new_class_counts['Normal'])
+            }
 
-    ax = balanced_dataset.expert_PAM50_subtype.value_counts().plot(kind='bar', title='Class label after')
-    X_train = balanced_dataset.drop(columns='expert_PAM50_subtype', inplace=False)
-    y_train = balanced_dataset.expert_PAM50_subtype
+            print('New class count:\n', sampling_strategy)
+            
+            balanced_dataset = cb.resampling_with_generation(sampling_strategy)
+            experiment_params['class_balance_thresholds'] = sampling_strategy
+
+        ax = balanced_dataset.expert_PAM50_subtype.value_counts().plot(kind='bar', title='Class label after')
+        X_train = balanced_dataset.drop(columns='expert_PAM50_subtype', inplace=False)
+        y_train = balanced_dataset.expert_PAM50_subtype
     
     # Encode the class labels
     if MULTI_LABEL:
@@ -137,7 +143,6 @@ def main():
         LB = LabelEncoder()
         y_train = LB.fit_transform(y_train)
         y_test = LB.transform(y_test)
-
 
     # Data standardization | normalization
     scaler = StandardScaler()
@@ -161,7 +166,7 @@ def main():
         plt.title(FEAT_SELECT + ' feature selection')
         print(featureScores.nlargest(10, 'Score'))
 
-        selected_feat = featureScores.sort_values(by='Score')[-N_feats:]
+        selected_feat = featureScores.sort_values(by='Score')[-N_feats:]['Feature']
 
     elif FEAT_SELECT == 'Recursive':
         rfe_selector = RFE(estimator=LogisticRegression(), n_features_to_select=N_feats, step=10, verbose=5)
@@ -239,17 +244,12 @@ def main():
 
     experiment_params['training_time'] =  stop-start
 
+    # Compute predictions
     pred = model.predict(X_test_scaled_selected)
-    prob_pred = model.predict_proba(X_test_scaled_selected)
 
-    precision = precision_score(pred, y_test, average='weighted')
-    recall = recall_score(pred, y_test, average='weighted')
-    print('Score test: ', precision, recall)
-
-    experiment_params['results'] = {
-        'precision': precision,
-        'recall': recall
-    }
+    # Compute metrics
+    metrics = cmp_metrics(pred, y_test)
+    experiment_params['results'] = metrics
 
     if not MULTI_LABEL:
         conf_mat = confusion_matrix(y_test, pred)        
@@ -328,10 +328,9 @@ def main():
 
     #print('After selection there is: {} genes!\nBefore selection we had {} genes!'.format(selected_features.shape[0], X.shape[1]))
 
-
     # Save the experiment properties as .json file
-    with open(os.path.join(EXP_PATH, experiment_name + '.json'), 'w') as file:
-        json.dump(experiment_params, file)
+    with open(os.path.join(EXP_PATH, experiment_name + '.pkl'), 'wb') as file:
+        pickle.dump(experiment_params, file)
 
     time.sleep(2)
 

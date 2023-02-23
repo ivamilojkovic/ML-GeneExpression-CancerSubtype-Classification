@@ -1,8 +1,50 @@
 import matplotlib.pyplot as plt
 from sklearn.model_selection import cross_validate
 import numpy as np
+from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 
 
+def cmp_metrics(pred, y_test):
+
+    metrics = {}
+
+    # Weighted scores
+    acc = accuracy_score(pred, y_test)
+    precision = precision_score(pred, y_test, average='weighted')
+    recall = recall_score(pred, y_test, average='weighted')
+    f1 = f1_score(pred, y_test, average='weighted')
+    print('Scores (weighted) on the test set:\n ')
+    print('Accuracy: {}\nPrecision: {}\nRecall: {}\nF1 score: {}\n'.format(acc, precision, recall, f1))
+
+    metrics['Accuracy weighted'] = acc
+    metrics['Precision weighted'] = precision
+    metrics['Recall weighted'] = recall
+    metrics['F1 score weighted'] = f1
+
+    # Unweighted scores
+    precision = precision_score(pred, y_test, average='macro')
+    recall = recall_score(pred, y_test, average='macro')
+    f1 = f1_score(pred, y_test, average='macro')
+    print('Scores (macro) on the test set:\n ')
+    print('Precision: {}\nRecall: {}\nF1 score: {}'.format(precision, recall, f1))
+
+    metrics['Precision unweighted'] = precision
+    metrics['Recall unweighted'] = recall
+    metrics['F1 score unweighted'] = f1
+
+     # Scores for each class/label
+    precision = precision_score(pred, y_test, average=None)
+    recall = recall_score(pred, y_test, average=None)
+    f1 = f1_score(pred, y_test, average=None)
+    print('Scores (per class) on the test set:\n ')
+    print('Precision: {}\nRecall: {}\nF1 score: {}'.format(precision, recall, f1))
+
+    metrics['Precision per class'] = precision
+    metrics['Recall per class'] = recall
+    metrics['F1 score per class'] = f1
+
+    return metrics
+    
 def cross_validation(model, _X, _y, _cv=5):
 
     _scoring = ['accuracy', 'precision', 'recall', 'f1']
