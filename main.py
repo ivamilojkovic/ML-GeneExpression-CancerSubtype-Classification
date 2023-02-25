@@ -1,5 +1,5 @@
 from sklearn.preprocessing import MinMaxScaler, LabelEncoder, StandardScaler, LabelBinarizer
-from sklearn.metrics import accuracy_score, confusion_matrix, f1_score, precision_score, recall_score, log_loss, jaccard_score, hamming_loss
+from sklearn.metrics import confusion_matrix, jaccard_score
 from sklearn.model_selection import train_test_split, cross_val_score, GridSearchCV, KFold
 from sklearn.neural_network import MLPClassifier
 from sklearn.linear_model import LogisticRegression
@@ -31,9 +31,12 @@ def main():
     SMOTE = True
     CROSS_VAL = False
     MULTI_LABEL = False
+    TEST_SIZE = 0.3
+    RANDOM_STATE = 4
+    OPTIM = True
+
     N_folds = 10
     N_feats = 500
-    TEST_SIZE = 0.3
 
     # Feature selection can be: Univariate, Recursive...
     FEAT_SELECT = 'Univariate' 
@@ -49,7 +52,8 @@ def main():
         'n_folds': N_folds,
         'n_features_to_select': N_feats,
         'test_size': TEST_SIZE,
-        'feature_selection_method': FEAT_SELECT
+        'feature_selection_method': FEAT_SELECT,
+        'optimized': OPTIM
     }
 
     # MODEL TYPE = {
@@ -65,23 +69,37 @@ def main():
 
     MODEL_PARAMS = {
         'Logistic Regression': {
-            'penalty': 'l2', 
-            'tol': 1e-3,
-            'random_state':4,
-            'solver':'lbfgs',
-            'max_iter':1000
+            'penalty': ['l2', None], 
+            'tol': [1e-1, 1e-2, 1e-3, 1e-4],
+            'solver': ['lbfgs', 'newton-cg', 'newton-cholesky', 'sag'],
+            'max_iter': [100, 500, 1000],
+            'C': [0.01, 0.05, 0.1, 0.5, 1, 5, 10],
         },
         'KNN': {
-            'n_neighbors':5, 
-            'weights':'uniform', 
-            'leaf_size':30, 
-            'metric':'minkowski'
-        } 
-
+            'n_neighbors': [3, 4, 5, 6, 7, 8],  
+            'weights': 'uniform', 
+            'leaf_size': [10, 20, 30, 40], 
+            'metric': 'minkowski'
+        },
+        'Decision Tree': {
+            'criterion': ['gini', 'entropy', 'log_loss'], 
+            'max_depth': [5, 10, 20], 
+            'min_samples_split': [2, 3, 4, 5],
+            'min_samples_leaf': [2, 3, 4, 5], 
+            'splitter': ['best', 'random'],
+            'class_weight': [None, 'balanced'],
+        },
+        'SVC': {
+            'C': [0.1, 0.5, 1, 5, 10],
+            'kernel': ['linear', 'poly', 'rbf', 'sigmoid', 'precomputed'],
+            'degree': [3, 4, 5, 6],
+            'gamma': ['scale', 'auto'],
+            'tol': [1e-1, 1e-2, 1e-3, 1e-4],
+            'class_weight': [None, 'balanced']
+        }
     }
 
     experiment_params['model_type'] = MODEL_TYPE
-    experiment_params['model_params'] = MODEL_PARAMS[MODEL_TYPE]
 
     # Load the dataset
     DATASET_PATH = "tcga_brca_raw_19036_1053samples.pkl"
@@ -96,6 +114,8 @@ def main():
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=TEST_SIZE, random_state=1, 
                                                         shuffle=True, stratify=y)                  
     ax = y_train.value_counts().plot(kind='bar', title='Class label before')
+
+    counts_before = y_train.value_counts().values
 
     # Solve data imbalance issue
     if SOLVE_IMB:
@@ -113,9 +133,11 @@ def main():
             experiment_params['class_balance_thresholds'] = balance_treshs
 
         else:
-            class_counts = y.value_counts()
+            class_counts = y_train.value_counts()
             mul = 1.5 # Increase with 50% 
             new_class_counts = round(class_counts*mul)
+            counts_after = new_class_counts.values
+            counts_diff = list(np.subtract(counts_after, counts_before))
 
             sampling_strategy = {
                 'LumA': int(new_class_counts['LumA']),
@@ -133,6 +155,12 @@ def main():
         ax = balanced_dataset.expert_PAM50_subtype.value_counts().plot(kind='bar', title='Class label after')
         X_train = balanced_dataset.drop(columns='expert_PAM50_subtype', inplace=False)
         y_train = balanced_dataset.expert_PAM50_subtype
+
+        # Plot class balance difference 
+        df = pd.DataFrame({'Original': counts_before,
+                           'Generated': counts_diff}, index=new_class_counts.keys())
+        ax = df.plot.bar(stacked=True)
+
     
     # Encode the class labels
     if MULTI_LABEL:
@@ -200,26 +228,22 @@ def main():
                                    solver='lbfgs', random_state=4, 
                                    alpha=1e-4, batch_size=5)
     elif MODEL_TYPE == 'Logistic Regression':
-        classifier = LogisticRegression(**MODEL_PARAMS[MODEL_TYPE])
+        classifier = LogisticRegression(random_state=RANDOM_STATE)
     elif MODEL_TYPE == 'KNN':
-        classifier = KNeighborsClassifier(n_neighbors=5, weights='uniform', 
-                                          leaf_size=30, metric='minkowski')
-
+        classifier = KNeighborsClassifier()
     elif MODEL_TYPE == 'Decision Tree':
-        classifier = DecisionTreeClassifier(criterion='gini', max_depth=10, 
-                                            min_samples_split=2, min_samples_leaf=3, 
-                                            random_state=4)
+        classifier = DecisionTreeClassifier(random_state=RANDOM_STATE)
     elif MODEL_TYPE == 'SVC':
-        classifier = SVC(C = 10, kernel='rbf', degree=4, 
-                         gamma='scale', random_state=4)
-
+        classifier = SVC(random_state=RANDOM_STATE)
     elif MODEL_TYPE == 'Random Forest':
-        classifier = RandomForestClassifier(n_estimators=100, criterion='gini',
-                                            min_samples_split=2, min_samples_leaf=2, 
-                                            random_state=4)
+        classifier = RandomForestClassifier(random_state=RANDOM_STATE)
     else:
         print('There no such model to be choosen! Try again!')
         exit()
+
+    # Define Grid Search
+    gs = GridSearchCV(classifier, param_grid=MODEL_PARAMS[MODEL_TYPE], 
+                      scoring='accuracy', cv=10, verbose=5)
 
     # Cross-validation to see if there is overfitting
     if CROSS_VAL and not MULTI_LABEL:
@@ -238,12 +262,25 @@ def main():
             print(scores)
 
     # Train and test
-    start = time.time()
-    model = classifier.fit(X_train_scaled_selected, y_train)
-    stop = time.time()
+    if OPTIM:
+        start = time.time()
+        gs.fit(X_train_scaled_selected, y_train)
+        stop = time.time()
+
+        model = gs.best_estimator_
+        best_params = gs.best_params_
+        experiment_params['model_params'] = best_params
+
+    else:
+        start = time.time()
+        model = classifier.fit(X_train_scaled_selected, y_train)
+        stop = time.time()
+
+        experiment_params['model_params'] = MODEL_PARAMS[MODEL_TYPE]
+
 
     experiment_params['training_time'] =  stop-start
-
+    
     # Compute predictions
     pred = model.predict(X_test_scaled_selected)
 
