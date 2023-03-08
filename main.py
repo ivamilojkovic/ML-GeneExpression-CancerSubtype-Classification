@@ -68,6 +68,16 @@ def main():
     MODEL_TYPE = 'Logistic Regression'
 
     MODEL_PARAMS = {
+        'MLP Classifier': {
+            'hidden_layer_sizes':[(20, 10, 5), (30, 10, 10, 5), 
+                                  (20, 5, 10), (20, 10, 5, 10)],
+            'activation': ['logistic', 'tanh'],
+            'solver': ['lbfgs', 'sgd', 'adam'], 
+            'alpha': [1e-1, 1e-2, 1e-3, 1e-4],
+            'batch_size': [5, 10, 15, 20],
+            'learning_rate': ['constant', 'invscaling', 'adaptive'],
+            'learning_rate_init': [0.01, 0.001, 0.0001]
+        },
         'Logistic Regression': {
             'penalty': ['l2', None], 
             'tol': [1e-1, 1e-2, 1e-3, 1e-4],
@@ -224,9 +234,7 @@ def main():
 
     # Define a model
     if MODEL_TYPE == 'MLP Classifier': 
-        classifier = MLPClassifier(hidden_layer_sizes=(20, 10, 5),
-                                   solver='lbfgs', random_state=4, 
-                                   alpha=1e-4, batch_size=5)
+        classifier = MLPClassifier(andom_state=RANDOM_STATE, max_iter=200, early_stopping=True)
     elif MODEL_TYPE == 'Logistic Regression':
         classifier = LogisticRegression(random_state=RANDOM_STATE)
     elif MODEL_TYPE == 'KNN':
@@ -243,7 +251,7 @@ def main():
 
     # Define Grid Search
     gs = GridSearchCV(classifier, param_grid=MODEL_PARAMS[MODEL_TYPE], 
-                      scoring='accuracy', cv=10, verbose=5)
+                      scoring='accuracy', cv=N_folds, verbose=5)
 
     # Cross-validation to see if there is overfitting
     if CROSS_VAL and not MULTI_LABEL:
