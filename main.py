@@ -21,6 +21,7 @@ import seaborn as sns
 import pandas as pd
 import numpy as np
 from utils import cmp_metrics
+import xgboost as xgb
 
 def main():
 
@@ -63,9 +64,10 @@ def main():
     #   Decision Tree
     #   SVC
     #   Random Forest
+    #   XGBoost
     #   }
 
-    MODEL_TYPE = 'Logistic Regression'
+    MODEL_TYPE = 'XGBoost'
 
     MODEL_PARAMS = {
         'MLP Classifier': {
@@ -106,6 +108,18 @@ def main():
             'gamma': ['scale', 'auto'],
             'tol': [1e-1, 1e-2, 1e-3, 1e-4],
             'class_weight': [None, 'balanced']
+        },
+        'XGBoost': {
+            'max_depth': [3, 4, 5, 7],
+            'base_score': [0.5], 
+            'booster': ['gbtree'],
+            'learning_rate': [0.1, 0.01, 0.05],
+            'n_estimators': [50, 100],
+            'reg_alpha': [0], 
+            'reg_lambda': [0, 1, 10],
+            'gamma': [0, 0.25, 1],
+            'subsample': [0.8],
+            'colsample_bytree': [0.5]
         }
     }
 
@@ -245,6 +259,8 @@ def main():
         classifier = SVC(random_state=RANDOM_STATE)
     elif MODEL_TYPE == 'Random Forest':
         classifier = RandomForestClassifier(random_state=RANDOM_STATE)
+    elif MODEL_TYPE == 'XGBoost':
+        classifier = xgb.XGBClassifier(random_state=RANDOM_STATE)
     else:
         print('There no such model to be choosen! Try again!')
         exit()
