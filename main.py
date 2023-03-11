@@ -22,6 +22,7 @@ import pandas as pd
 import numpy as np
 from utils import cmp_metrics
 import xgboost as xgb
+import lightgbm as lgb
 
 def main():
 
@@ -65,9 +66,10 @@ def main():
     #   SVC
     #   Random Forest
     #   XGBoost
+    #   LightGBM
     #   }
 
-    MODEL_TYPE = 'XGBoost'
+    MODEL_TYPE = 'LightGBM'
 
     MODEL_PARAMS = {
         'MLP Classifier': {
@@ -120,6 +122,15 @@ def main():
             'gamma': [0, 0.25, 1],
             'subsample': [0.8],
             'colsample_bytree': [0.5]
+        },
+        'LightGBM': {
+            'num_leaves': [2, 3, 5],
+            'max_depth': [3, 5, 7, 9],
+            'n_estimators': [50, 100],
+            'learning_rate':[0.01, 0.03, 0.1, 0.3],
+            'reg_lambda': [10, 30, 60],
+            'reg_alpha': [10, 30, 60],
+            'min_gain_to_split': [2, 5, 10]
         }
     }
 
@@ -261,6 +272,8 @@ def main():
         classifier = RandomForestClassifier(random_state=RANDOM_STATE)
     elif MODEL_TYPE == 'XGBoost':
         classifier = xgb.XGBClassifier(random_state=RANDOM_STATE)
+    elif MODEL_TYPE == 'LightGBM':
+        classifier = lgb.LGBMClassifier(random_state=RANDOM_STATE)
     else:
         print('There no such model to be choosen! Try again!')
         exit()
