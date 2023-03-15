@@ -2,6 +2,7 @@
 /experiments
 /__pycache__
 /.ipynb_checkpoints
+/images
 
 # Ignore dataset
 *.pkl

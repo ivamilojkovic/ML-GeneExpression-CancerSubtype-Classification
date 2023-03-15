@@ -1,11 +1,11 @@
-from sklearn.preprocessing import MinMaxScaler, LabelEncoder, StandardScaler, LabelBinarizer
+from sklearn.preprocessing import MinMaxScaler, LabelEncoder, StandardScaler, LabelBinarizer, FunctionTransformer
 from sklearn.metrics import confusion_matrix, jaccard_score
 from sklearn.model_selection import train_test_split, cross_val_score, GridSearchCV, KFold
 from sklearn.neural_network import MLPClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.tree import DecisionTreeClassifier
-from sklearn.ensemble import RandomForestClassifier, ExtraTreesClassifier
+from sklearn.ensemble import RandomForestClassifier, ExtraTreesClassifier, AdaBoostClassifier
 from sklearn.svm import SVC
 from sklearn.feature_selection import SelectFromModel, SelectKBest, RFE, f_classif, chi2
 from sklearn.multiclass import OneVsOneClassifier, OneVsRestClassifier
@@ -23,6 +23,10 @@ import numpy as np
 from utils import cmp_metrics
 import xgboost as xgb
 import lightgbm as lgb
+from utils import log_transform
+
+from skmultilearn.problem_transform import LabelPowerset
+from skmultilearn.adapt import MLkNN
 
 def main():
 
@@ -32,16 +36,15 @@ def main():
     SOLVE_IMB = False # Solve class imbalance problem
     SMOTE = True
     CROSS_VAL = False
-    MULTI_LABEL = False
     TEST_SIZE = 0.3
     RANDOM_STATE = 4
-    OPTIM = True
+    OPTIM = False
 
     N_folds = 10
     N_feats = 500
 
     # Feature selection can be: Univariate, Recursive...
-    FEAT_SELECT = 'Univariate' 
+    FEAT_SELECT = 'Filter' 
 
     # Get the current date and time
     now = datetime.datetime.now()
@@ -50,7 +53,7 @@ def main():
         'solve_ibm': SOLVE_IMB,
         'use_smote': SMOTE,
         'cross_validation': CROSS_VAL,
-        'multi_label_classification': MULTI_LABEL,
+        'multi_label_classification': False,
         'n_folds': N_folds,
         'n_features_to_select': N_feats,
         'test_size': TEST_SIZE,
@@ -67,9 +70,10 @@ def main():
     #   Random Forest
     #   XGBoost
     #   LightGBM
+    #   AdaBoost
     #   }
 
-    MODEL_TYPE = 'LightGBM'
+    MODEL_TYPE = 'Logistic Regression'
 
     MODEL_PARAMS = {
         'MLP Classifier': {
@@ -91,9 +95,9 @@ def main():
         },
         'KNN': {
             'n_neighbors': [3, 4, 5, 6, 7, 8],  
-            'weights': 'uniform', 
+            'weights': ['uniform'], 
             'leaf_size': [10, 20, 30, 40], 
-            'metric': 'minkowski'
+            'metric': ['minkowski']
         },
         'Decision Tree': {
             'criterion': ['gini', 'entropy', 'log_loss'], 
@@ -104,12 +108,18 @@ def main():
             'class_weight': [None, 'balanced'],
         },
         'SVC': {
-            'C': [0.1, 0.5, 1, 5, 10],
-            'kernel': ['linear', 'poly', 'rbf', 'sigmoid', 'precomputed'],
-            'degree': [3, 4, 5, 6],
+            'C': [0.01, 0.05, 0.1, 0.5, 1, 5, 10],
+            'kernel': ['linear', 'poly', 'rbf', 'sigmoid'],
+            'degree': [2, 3, 4, 5, 6],
             'gamma': ['scale', 'auto'],
             'tol': [1e-1, 1e-2, 1e-3, 1e-4],
             'class_weight': [None, 'balanced']
+        },
+        'Random Forest': {
+            'n_estimators':[50, 100, 150], 
+            'criterion': ['gini', 'entropy', 'log_loss'], 
+            'min_samples_split': [2, 3, 4, 5], 
+            'min_samples_leaf': [1, 2, 3]
         },
         'XGBoost': {
             'max_depth': [3, 4, 5, 7],
@@ -131,6 +141,10 @@ def main():
             'reg_lambda': [10, 30, 60],
             'reg_alpha': [10, 30, 60],
             'min_gain_to_split': [2, 5, 10]
+        },
+        'AdaBoost': {
+            'n_estimators': [50, 100, 150, 200], 
+            'learning_rate': [0.01, 0.03, 0.1, 0.3, 1.0, 10]
         }
     }
 
@@ -198,17 +212,12 @@ def main():
 
     
     # Encode the class labels
-    if MULTI_LABEL:
-        LB = LabelBinarizer()
-        y_train = LB.fit_transform(y_train)
-        y_test = LB.transform(y_test)
-    else:
-        LB = LabelEncoder()
-        y_train = LB.fit_transform(y_train)
-        y_test = LB.transform(y_test)
+    LB = LabelEncoder()
+    y_train = LB.fit_transform(y_train)
+    y_test = LB.transform(y_test)
 
     # Data standardization | normalization
-    scaler = StandardScaler()
+    scaler = FunctionTransformer(log_transform)
     X_train_scaled = scaler.fit_transform(X_train)
     X_train_scaled = pd.DataFrame(X_train_scaled, columns=X.columns)
     X_test_scaled = scaler.transform(X_test)
@@ -230,6 +239,10 @@ def main():
         print(featureScores.nlargest(10, 'Score'))
 
         selected_feat = featureScores.sort_values(by='Score')[-N_feats:]['Feature']
+    
+    elif FEAT_SELECT == 'Filter':
+        with open('high_corr_feat.pkl', 'rb') as file:
+            selected_feat = pickle.load(file)
 
     elif FEAT_SELECT == 'Recursive':
         rfe_selector = RFE(estimator=LogisticRegression(), n_features_to_select=N_feats, step=10, verbose=5)
@@ -239,7 +252,7 @@ def main():
         selected_feat = X.loc[:,rfe_support].columns.tolist()
         print(str(len(selected_feat)), 'selected features')
 
-    else:
+    elif FEAT_SELECT == 'Wrapper':
         best_feat_model  = ExtraTreesClassifier(n_estimators=10)
         best_feat_model.fit(X_train_scaled, y_train)
         
@@ -259,7 +272,7 @@ def main():
 
     # Define a model
     if MODEL_TYPE == 'MLP Classifier': 
-        classifier = MLPClassifier(andom_state=RANDOM_STATE, max_iter=200, early_stopping=True)
+        classifier = MLPClassifier(random_state=RANDOM_STATE, max_iter=200, early_stopping=True)
     elif MODEL_TYPE == 'Logistic Regression':
         classifier = LogisticRegression(random_state=RANDOM_STATE)
     elif MODEL_TYPE == 'KNN':
@@ -274,34 +287,27 @@ def main():
         classifier = xgb.XGBClassifier(random_state=RANDOM_STATE)
     elif MODEL_TYPE == 'LightGBM':
         classifier = lgb.LGBMClassifier(random_state=RANDOM_STATE)
+    elif MODEL_TYPE == 'AdaBoost':
+        classifier = AdaBoostClassifier(random_state=RANDOM_STATE)
     else:
         print('There no such model to be choosen! Try again!')
         exit()
 
-    # Define Grid Search
-    gs = GridSearchCV(classifier, param_grid=MODEL_PARAMS[MODEL_TYPE], 
-                      scoring='accuracy', cv=N_folds, verbose=5)
-
-    # Cross-validation to see if there is overfitting
-    if CROSS_VAL and not MULTI_LABEL:
+    # ---------------- Cross-validation ---------------
+    if CROSS_VAL:
         scores = cross_val_score(classifier, X_train_scaled, y_train,
                                  scoring='neg_log_loss', 
                                  cv=N_folds, verbose=5)
-
-    if MULTI_LABEL:
-        # Use multi-label classifier to wrap the base classifier 
-        classifier = OneVsRestClassifier(estimator=classifier)
-        if CROSS_VAL:
-            scores = cross_val_score(classifier, X_train_scaled, y_train,
-                                 scoring='f1_samples', 
-                                 cv=N_folds, verbose=5)
-            experiment_params['cross_val_scores'] = scores
-            print(scores)
-
-    # Train and test
+        
+    # ----------------- TRAIN & TEST ------------------
     if OPTIM:
+
+        # Define Grid Search
+        gs = GridSearchCV(classifier, param_grid=MODEL_PARAMS[MODEL_TYPE], 
+                        scoring='accuracy', cv=N_folds, verbose=5)
+        
         start = time.time()
-        gs.fit(X_train_scaled_selected, y_train)
+        gs.fit(X_train_scaled_selected.values, y_train)
         stop = time.time()
 
         model = gs.best_estimator_
@@ -318,81 +324,80 @@ def main():
 
     experiment_params['training_time'] =  stop-start
     
-    # Compute predictions
-    pred = model.predict(X_test_scaled_selected)
+    # --------------- Compute predictions ------------------
+    pred = model.predict(X_test_scaled_selected.values)
 
-    # Compute metrics
+    # ---------------- Compute metrics ---------------------
     metrics = cmp_metrics(pred, y_test)
     experiment_params['results'] = metrics
 
-    if not MULTI_LABEL:
-        conf_mat = confusion_matrix(y_test, pred)        
-        #experiment_params['results']['confusion_matrix'] = conf_mat
+    conf_mat = confusion_matrix(y_test, pred)        
+    #experiment_params['results']['confusion_matrix'] = conf_mat
 
-        df = pd.DataFrame(conf_mat, index = [i for i in LB.classes_], columns = [i for i in LB.classes_])
-        sns.heatmap(df.div(df.values.sum()), annot=True)
-        plt.show()
+    df = pd.DataFrame(conf_mat, index = [i for i in LB.classes_], columns = [i for i in LB.classes_])
+    sns.heatmap(df.div(df.values.sum()), annot=True)
+    plt.show()
 
-    else:
-        jacc_score = jaccard_score(pred, y_test, average='samples')
-        experiment_params['results']['jaccard_score'] = jacc_score
+    # else:
+    #     jacc_score = jaccard_score(pred, y_test, average='samples')
+    #     experiment_params['results']['jaccard_score'] = jacc_score
         
 
-    if MULTI_LABEL:
+    # if MULTI_LABEL:
 
-        # Fit an ensemble of selected classifier chains and 
-        # compute the average prediction of all the chains.
+    #     # Fit an ensemble of selected classifier chains and 
+    #     # compute the average prediction of all the chains.
 
-        chains = [ClassifierChain(classifier, order='random', random_state=i) for i in range(10)]
-        chain_preds = []
-        for chain in chains:
-            chain.fit(X_train_scaled_selected, y_train)
-            chain_preds.append(chain.predict(X_test_scaled_selected))
+    #     chains = [ClassifierChain(classifier, order='random', random_state=i) for i in range(10)]
+    #     chain_preds = []
+    #     for chain in chains:
+    #         chain.fit(X_train_scaled_selected, y_train)
+    #         chain_preds.append(chain.predict(X_test_scaled_selected))
 
-        chain_preds = np.array(chain_preds)
-        chain_jaccard_scores = [
-            jaccard_score(y_pred >=0.5, y_test, average='samples') for y_pred in chain_preds
-        ]
+    #     chain_preds = np.array(chain_preds)
+    #     chain_jaccard_scores = [
+    #         jaccard_score(y_pred >=0.5, y_test, average='samples') for y_pred in chain_preds
+    #     ]
 
-        y_pred_avg = chain_preds.mean(axis=0)
-        avg_jaccard_score = jaccard_score(y_test, y_pred_avg >=0.5, average='samples')
+    #     y_pred_avg = chain_preds.mean(axis=0)
+    #     avg_jaccard_score = jaccard_score(y_test, y_pred_avg >=0.5, average='samples')
 
-        model_scores = [jacc_score] + chain_jaccard_scores + [avg_jaccard_score]
-        experiment_params['results']['chain_scores'] = model_scores
+    #     model_scores = [jacc_score] + chain_jaccard_scores + [avg_jaccard_score]
+    #     experiment_params['results']['chain_scores'] = model_scores
 
-        ### PLOT
-        model_names = (
-            "Independent",
-            "Chain 1",
-            "Chain 2",
-            "Chain 3",
-            "Chain 4",
-            "Chain 5",
-            "Chain 6",
-            "Chain 7",
-            "Chain 8",
-            "Chain 9",
-            "Chain 10",
-            "Ensemble",
-        )
+    #     ### PLOT
+    #     model_names = (
+    #         "Independent",
+    #         "Chain 1",
+    #         "Chain 2",
+    #         "Chain 3",
+    #         "Chain 4",
+    #         "Chain 5",
+    #         "Chain 6",
+    #         "Chain 7",
+    #         "Chain 8",
+    #         "Chain 9",
+    #         "Chain 10",
+    #         "Ensemble",
+    #     )
 
-        x_pos = np.arange(len(model_names))
+    #     x_pos = np.arange(len(model_names))
 
-        # Plot the Jaccard similarity scores for the independent model, each of the
-        # chains, and the ensemble (note that the vertical axis on this plot does
-        # not begin at 0).
+    #     # Plot the Jaccard similarity scores for the independent model, each of the
+    #     # chains, and the ensemble (note that the vertical axis on this plot does
+    #     # not begin at 0).
 
-        fig, ax = plt.subplots(figsize=(7, 4))
-        ax.grid(True)
-        ax.set_title("Classifier Chain Ensemble Performance Comparison")
-        ax.set_xticks(x_pos)
-        ax.set_xticklabels(model_names, rotation="vertical")
-        ax.set_ylabel("Jaccard Similarity Score")
-        ax.set_ylim([min(model_scores) * 0.9, max(model_scores) * 1.1])
-        colors = ["r"] + ["b"] * len(chain_jaccard_scores) + ["g"]
-        ax.bar(x_pos, model_scores, alpha=0.5, color=colors)
-        plt.tight_layout()
-        plt.show()
+    #     fig, ax = plt.subplots(figsize=(7, 4))
+    #     ax.grid(True)
+    #     ax.set_title("Classifier Chain Ensemble Performance Comparison")
+    #     ax.set_xticks(x_pos)
+    #     ax.set_xticklabels(model_names, rotation="vertical")
+    #     ax.set_ylabel("Jaccard Similarity Score")
+    #     ax.set_ylim([min(model_scores) * 0.9, max(model_scores) * 1.1])
+    #     colors = ["r"] + ["b"] * len(chain_jaccard_scores) + ["g"]
+    #     ax.bar(x_pos, model_scores, alpha=0.5, color=colors)
+    #     plt.tight_layout()
+    #     plt.show()
 
     # Feature selection
     #selection_model = SelectFromModel(classifier, prefit=True)
