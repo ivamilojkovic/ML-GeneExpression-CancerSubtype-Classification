@@ -4,7 +4,6 @@ import numpy as np
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 
 def log_transform(x):
-    print(x)
     return np.log(x + 1)
 
 def cmp_metrics(pred, y_test):
