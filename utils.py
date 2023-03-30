@@ -2,9 +2,21 @@ import matplotlib.pyplot as plt
 from sklearn.model_selection import cross_validate
 import numpy as np
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
+import torch
+from deeplearn_models import *
 
 def log_transform(x):
     return np.log(x + 1)
+
+def check_dim(model, x_check=None):
+    # Check model dimensions
+    if isinstance(model, AutoEncoder):
+        x_check = torch.randn(10, 1, 25150)
+        if model(x_check).shape==torch.Size([10,1,25150]):
+            print('Model is well defined!')
+    elif isinstance(model, Classifier):
+        if model(x_check).shape==torch.Size([1,5]):
+            print('Model is well defined!')
 
 def cmp_metrics(pred, y_test):
 
