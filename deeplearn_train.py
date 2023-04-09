@@ -7,11 +7,10 @@ from torch.utils.data import DataLoader, Subset
 from dataset import GeneExpDataset
 from tqdm import tqdm
 import numpy as np
-from sklearn.metrics import mean_squared_error, accuracy_score
+from sklearn.metrics import mean_squared_error, accuracy_score, f1_score, recall_score, precision_score
 from sklearn.model_selection import train_test_split
 import pickle
 from configs import *
-
 
 def test_AE(test_loader, ae_model):
 
@@ -26,15 +25,19 @@ def test_AE(test_loader, ae_model):
     return avg_mse, total_mse
 
 def test_class(test_loader, model):
-    total_acc = []
+    y_matrix, out_matrix = [], []
     for x, y in test_loader:
         out = model(x.unsqueeze(1).to(torch.float32))
         gt_class = (y == 1).nonzero(as_tuple=True)[1]
-        acc = (out.argmax(1) == gt_class).sum().item()
-        total_acc.append(acc)
 
-    acc = sum(total_acc)/len(total_acc)
-    return acc, total_acc
+        # Create output and y rows e.g. [0, 0, 1, 0, 0]
+        out_row = [0]*5
+        out_row[out.argmax(1)]=1
+        y_row = y.numpy()[0]
+        out_matrix.append(out_row)
+        y_matrix.append(y_row)
+
+    return np.stack(out_matrix), np.stack(y_matrix)
 
 def create_save_loaders(dataset):
 
@@ -108,8 +111,8 @@ if __name__=='__main__':
     # Define model, optimizer and criterion
     model_params = model_ae_params
     model = CNNAttentionClassifier(**model_params)
-    optimizer = Adam(model.parameters(), lr=1e-2, weight_decay=0.1)
-    criterion = nn.CrossEntropyLoss()
+    optimizer = Adam(model.parameters(), lr=1e-5, weight_decay=0.1)
+    criterion = nn.MSELoss()
 
     min_val_loss = np.inf
 
@@ -137,16 +140,25 @@ if __name__=='__main__':
             loss = criterion(val_out.float(), y_val.float())
             batch_val_loss += loss.item()
         
-        print("Training batch loss in epoch: ", batch_loss/len(train_loader), epoch)
-        print("Validation batch loss in epoch: ", batch_val_loss/len(val_loader), epoch)
+        print("\nTraining batch loss in epoch: ", batch_loss/len(train_loader), epoch)
+        print("\nValidation batch loss in epoch: ", batch_val_loss/len(val_loader), epoch)
 
         if batch_val_loss < min_val_loss:
             min_val_loss = batch_loss
             best_model = model
 
-    # Test
-    test_results, _ = test_class(test_loader, best_model)
-    print('Test results {}'.format(test_results))
+    # Test scores
+    y_pred, y_true = test_class(test_loader, best_model)
+    recall = recall_score(y_pred, y_true, average='macro')
+    prec = precision_score(y_pred, y_true, average='macro')
+    f1 = f1_score(y_pred, y_true, average='macro')
+    acc = accuracy_score(y_pred, y_true)
+
+    print('Test results:\n')
+    print("Accuracy: {}".format(acc))
+    print("Recall unweighted: {}".format(recall))
+    print("Precision unweighted: {}".format(prec))
+    print("F1 score unweighted: {}".format(f1))
 
     with open('best_model.pkl', 'wb') as f:
         pickle.dump(best_model, f)

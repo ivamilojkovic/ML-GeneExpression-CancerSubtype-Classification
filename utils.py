@@ -1,12 +1,12 @@
 import matplotlib.pyplot as plt
 from sklearn.model_selection import cross_validate
 import numpy as np
-from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
+from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, matthews_corrcoef
 import torch
 from deeplearn_models import *
 
 def log_transform(x):
-    return np.log(x + 1)
+    return np.log2(x + 0.1)
 
 def check_dim(model, x_check=None):
     # Check model dimensions
@@ -50,12 +50,14 @@ def cmp_metrics(pred, y_test):
     precision = precision_score(pred, y_test, average=None)
     recall = recall_score(pred, y_test, average=None)
     f1 = f1_score(pred, y_test, average=None)
+    mcc = matthews_corrcoef(pred, y_test)
     print('Scores (per class) on the test set:\n ')
-    print('Precision: {}\nRecall: {}\nF1 score: {}'.format(precision, recall, f1))
+    print('Precision: {}\nRecall: {}\nF1 score: {}\nMCC: {}'.format(precision, recall, f1, mcc))
 
     metrics['Precision per class'] = precision
     metrics['Recall per class'] = recall
     metrics['F1 score per class'] = f1
+    metrics['MCC'] = mcc
 
     return metrics
     
@@ -105,3 +107,19 @@ def plot_result(x_label, y_label, plot_title, train_data, val_data):
     plt.legend()
     plt.grid(True)
     plt.show()
+
+def forward_selection(data, target, significance_level=0.05):
+    initial_features = data.columns.tolist()
+    best_features = []
+    while (len(initial_features)>0):
+        remaining_features = list(set(initial_features)-set(best_features))
+        new_pval = pd.Series(index=remaining_features)
+        for new_column in remaining_features:
+            model = sm.OLS(target, sm.add_constant(data[best_features+[new_column]])).fit()
+            new_pval[new_column] = model.pvalues[new_column]
+        min_p_value = new_pval.min()
+        if(min_p_value<significance_level):
+            best_features.append(new_pval.idxmin())
+        else:
+            break
+    return best_features

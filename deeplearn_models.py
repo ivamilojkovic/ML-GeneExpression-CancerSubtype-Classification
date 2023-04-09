@@ -51,7 +51,7 @@ class CNNAutoEncoder(nn.Module):
             nn.ReLU(),
             nn.MaxPool1d(kernel_size=2, stride=2)
             )      
-        self.attention = nn.MultiheadAttention(embed_dim=3143, num_heads=1, dropout=0.3)  
+        self.attention = nn.MultiheadAttention(embed_dim=3143, num_heads=1, dropout=0.3, batch_first=True)  
 
         # Decoder
         self.decoder = nn.Sequential(
@@ -92,7 +92,9 @@ class CNNAttentionEncoder(nn.Module):
             nn.ReLU(),
             nn.MaxPool1d(kernel_size=2, stride=2)
             )      
-        self.attention = nn.MultiheadAttention(embed_dim=latent_dim, num_heads=3, dropout=0.3)  
+        self.attention = nn.MultiheadAttention(embed_dim=latent_dim, 
+                                               num_heads=4, dropout=0.3,
+                                               batch_first=True)  
 
     def forward(self, x):
         x = x.to(torch.float32)

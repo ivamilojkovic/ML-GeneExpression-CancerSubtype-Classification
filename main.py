@@ -1,5 +1,5 @@
-from sklearn.preprocessing import MinMaxScaler, LabelEncoder, StandardScaler, LabelBinarizer, FunctionTransformer
-from sklearn.metrics import confusion_matrix, jaccard_score
+from sklearn.preprocessing import LabelEncoder, FunctionTransformer
+from sklearn.metrics import confusion_matrix
 from sklearn.model_selection import train_test_split, cross_val_score, GridSearchCV, KFold
 from sklearn.neural_network import MLPClassifier
 from sklearn.linear_model import LogisticRegression
@@ -8,15 +8,12 @@ from sklearn.tree import DecisionTreeClassifier
 from sklearn.ensemble import RandomForestClassifier, ExtraTreesClassifier, AdaBoostClassifier
 from sklearn.svm import SVC
 from sklearn.feature_selection import SelectFromModel, SelectKBest, RFE, f_classif, chi2
-from sklearn.multiclass import OneVsOneClassifier, OneVsRestClassifier
-from sklearn.multioutput import ClassifierChain
-import json, os, pickle
-import datetime
+from mlxtend.feature_selection import SequentialFeatureSelector
+import os, pickle, datetime, time
 
 import pickle as pkl
 from data_preprocessing import ClassBalance
 import matplotlib.pyplot as plt
-import time
 import seaborn as sns
 import pandas as pd
 import numpy as np
@@ -25,8 +22,12 @@ import xgboost as xgb
 import lightgbm as lgb
 from utils import log_transform
 
-from skmultilearn.problem_transform import LabelPowerset
-from skmultilearn.adapt import MLkNN
+plt.style.use('ggplot')
+sns.set_theme()
+
+from warnings import simplefilter
+from sklearn.exceptions import ConvergenceWarning
+simplefilter("ignore", category=ConvergenceWarning)
 
 def main():
 
@@ -34,24 +35,24 @@ def main():
 
     # Set the parameters
     SOLVE_IMB = False # Solve class imbalance problem
-    SMOTE = True
+    TYPE_CI = 'case1'
     CROSS_VAL = False
     TEST_SIZE = 0.3
     RANDOM_STATE = 4
-    OPTIM = False
+    OPTIM = True
 
     N_folds = 10
     N_feats = 500
 
     # Feature selection can be: Univariate, Recursive...
-    FEAT_SELECT = 'Filter' 
+    FEAT_SELECT = 'wrapper'
 
     # Get the current date and time
     now = datetime.datetime.now()
     experiment_name =  'run_' + now.strftime("%d-%m-%Y_%H:%M:%S")
     experiment_params = {
         'solve_ibm': SOLVE_IMB,
-        'use_smote': SMOTE,
+        'ci_type': TYPE_CI,
         'cross_validation': CROSS_VAL,
         'multi_label_classification': False,
         'n_folds': N_folds,
@@ -73,7 +74,7 @@ def main():
     #   AdaBoost
     #   }
 
-    MODEL_TYPE = 'Logistic Regression'
+    MODEL_TYPE = 'KNN'
 
     MODEL_PARAMS = {
         'MLP Classifier': {
@@ -163,25 +164,31 @@ def main():
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=TEST_SIZE, random_state=1, 
                                                         shuffle=True, stratify=y)                  
     ax = y_train.value_counts().plot(kind='bar', title='Class label before')
-
     counts_before = y_train.value_counts().values
 
     # Solve data imbalance issue
     if SOLVE_IMB:
         cb = ClassBalance(X=X_train, y=y_train)
+        if TYPE_CI == 'case1':
+            balanced_dataset = cb.cut_LumA(thresh=200)
+            counts_after = balanced_dataset.expert_PAM50_subtype.value_counts()
 
-        if not SMOTE:
-            balance_treshs = {
+        elif TYPE_CI == 'case2':
+            balanced_dataset = cb.cut_LumA_LumB_Basal(thresh=[100, 100, 80])
+            counts_after = balanced_dataset.expert_PAM50_subtype.value_counts()
+
+        elif TYPE_CI == 'case3':
+            sampling_strategy = {
                 'LumA': 100,
                 'LumB': 100,
                 'Basal': 100,
                 'Her2': 80,
-                'Normal': 50
+                'Normal': 80
             }
-            balanced_dataset = cb.resampling(balance_treshs)
-            experiment_params['class_balance_thresholds'] = balance_treshs
+            balanced_dataset = cb.resampling_with_generation(sampling_strategy)
+            counts_after = balanced_dataset.expert_PAM50_subtype.value_counts()
 
-        else:
+        elif TYPE_CI == 'case4':
             class_counts = y_train.value_counts()
             mul = 1.5 # Increase with 50% 
             new_class_counts = round(class_counts*mul)
@@ -195,28 +202,53 @@ def main():
                 'Her2': int(new_class_counts['Her2']),
                 'Normal': int(new_class_counts['Normal'])
             }
-
             print('New class count:\n', sampling_strategy)
             
             balanced_dataset = cb.resampling_with_generation(sampling_strategy)
             experiment_params['class_balance_thresholds'] = sampling_strategy
 
-        ax = balanced_dataset.expert_PAM50_subtype.value_counts().plot(kind='bar', title='Class label after')
         X_train = balanced_dataset.drop(columns='expert_PAM50_subtype', inplace=False)
         y_train = balanced_dataset.expert_PAM50_subtype
 
         # Plot class balance difference 
-        df = pd.DataFrame({'Original': counts_before,
-                           'Generated': counts_diff}, index=new_class_counts.keys())
-        ax = df.plot.bar(stacked=True)
+        df_before = pd.DataFrame({'Class': list(counts_after.index),
+                                'Counts': counts_before,
+                                'Type': ['Before']*5
+                                })
+        df_after = pd.DataFrame({'Class': list(counts_after.index),
+                                'Counts': counts_after,
+                                'Type': ['After']*5
+                                })
 
-    
+        df = pd.concat([df_before, df_after], ignore_index=True)
+
+        ax = plt.figure()
+        ax = sns.barplot(
+                x = "Class",
+                y = "Counts",
+                hue = "Type",
+                data = df
+                )
+        for g in ax.patches:
+            ax.annotate(format(g.get_height(), '.0f'),
+                        (g.get_x() + g.get_width() / 2., g.get_height()),
+                        ha = 'center', va = 'center',
+                        xytext = (0, 5),
+                        textcoords = 'offset points',
+                        fontsize=8)
+            
+        ax.tick_params(axis='x', rotation=30)
+        ax.set_title('Class balance before and after')
+        #ax = df.plot.bar(stacked=False)
+
     # Encode the class labels
     LB = LabelEncoder()
     y_train = LB.fit_transform(y_train)
     y_test = LB.transform(y_test)
 
     # Data standardization | normalization
+    X_train = X_train.divide(X_train.sum(axis=1), axis=0) * 1e6
+    X_test = X_test.divide(X_test.sum(axis=1), axis=0) * 1e6
     scaler = FunctionTransformer(log_transform)
     X_train_scaled = scaler.fit_transform(X_train)
     X_train_scaled = pd.DataFrame(X_train_scaled, columns=X.columns)
@@ -266,6 +298,24 @@ def main():
 
         selected_feat = dict(feat_importances.sort_values()[-N_feats:]).keys()
 
+    elif FEAT_SELECT == 'embedded':
+        model = LogisticRegression(C=0.1)
+        selector = SelectFromModel(model, threshold=0.025) 
+        selector.fit_transform(X_train_scaled, y_train)
+        selected_feat = X_train_scaled.columns[selector.get_support()]
+
+    elif FEAT_SELECT == 'wrapper':
+        # Forward Feature Selection
+        model = RandomForestClassifier(n_estimators=100, 
+                                       criterion='log_loss', 
+                                       random_state=42)
+        selector = SequentialFeatureSelector(model, k_features=50, 
+                                            forward=True, verbose=2,
+                                            floating=False, cv=3, 
+                                            scoring='f1_weighted')
+        selector.fit(X_train_scaled, y_train)
+        selected_feat = selector.k_feature_names_
+
     # Extract the data frames with only selected features
     X_train_scaled_selected = X_train_scaled[selected_feat]
     X_test_scaled_selected = X_test_scaled[selected_feat]
@@ -301,11 +351,9 @@ def main():
         
     # ----------------- TRAIN & TEST ------------------
     if OPTIM:
-
         # Define Grid Search
         gs = GridSearchCV(classifier, param_grid=MODEL_PARAMS[MODEL_TYPE], 
-                        scoring='accuracy', cv=N_folds, verbose=5)
-        
+                        scoring='accuracy', cv=N_folds, verbose=3)
         start = time.time()
         gs.fit(X_train_scaled_selected.values, y_train)
         stop = time.time()
@@ -320,7 +368,6 @@ def main():
         stop = time.time()
 
         experiment_params['model_params'] = MODEL_PARAMS[MODEL_TYPE]
-
 
     experiment_params['training_time'] =  stop-start
     
@@ -337,73 +384,6 @@ def main():
     df = pd.DataFrame(conf_mat, index = [i for i in LB.classes_], columns = [i for i in LB.classes_])
     sns.heatmap(df.div(df.values.sum()), annot=True)
     plt.show()
-
-    # else:
-    #     jacc_score = jaccard_score(pred, y_test, average='samples')
-    #     experiment_params['results']['jaccard_score'] = jacc_score
-        
-
-    # if MULTI_LABEL:
-
-    #     # Fit an ensemble of selected classifier chains and 
-    #     # compute the average prediction of all the chains.
-
-    #     chains = [ClassifierChain(classifier, order='random', random_state=i) for i in range(10)]
-    #     chain_preds = []
-    #     for chain in chains:
-    #         chain.fit(X_train_scaled_selected, y_train)
-    #         chain_preds.append(chain.predict(X_test_scaled_selected))
-
-    #     chain_preds = np.array(chain_preds)
-    #     chain_jaccard_scores = [
-    #         jaccard_score(y_pred >=0.5, y_test, average='samples') for y_pred in chain_preds
-    #     ]
-
-    #     y_pred_avg = chain_preds.mean(axis=0)
-    #     avg_jaccard_score = jaccard_score(y_test, y_pred_avg >=0.5, average='samples')
-
-    #     model_scores = [jacc_score] + chain_jaccard_scores + [avg_jaccard_score]
-    #     experiment_params['results']['chain_scores'] = model_scores
-
-    #     ### PLOT
-    #     model_names = (
-    #         "Independent",
-    #         "Chain 1",
-    #         "Chain 2",
-    #         "Chain 3",
-    #         "Chain 4",
-    #         "Chain 5",
-    #         "Chain 6",
-    #         "Chain 7",
-    #         "Chain 8",
-    #         "Chain 9",
-    #         "Chain 10",
-    #         "Ensemble",
-    #     )
-
-    #     x_pos = np.arange(len(model_names))
-
-    #     # Plot the Jaccard similarity scores for the independent model, each of the
-    #     # chains, and the ensemble (note that the vertical axis on this plot does
-    #     # not begin at 0).
-
-    #     fig, ax = plt.subplots(figsize=(7, 4))
-    #     ax.grid(True)
-    #     ax.set_title("Classifier Chain Ensemble Performance Comparison")
-    #     ax.set_xticks(x_pos)
-    #     ax.set_xticklabels(model_names, rotation="vertical")
-    #     ax.set_ylabel("Jaccard Similarity Score")
-    #     ax.set_ylim([min(model_scores) * 0.9, max(model_scores) * 1.1])
-    #     colors = ["r"] + ["b"] * len(chain_jaccard_scores) + ["g"]
-    #     ax.bar(x_pos, model_scores, alpha=0.5, color=colors)
-    #     plt.tight_layout()
-    #     plt.show()
-
-    # Feature selection
-    #selection_model = SelectFromModel(classifier, prefit=True)
-    #X_new = selection_model.transform(X_train_scaled)
-    #selected_feat_idx = selection_model.get_support()
-    #selected_features = X_train.columns[selected_feat_idx]
 
     #print('After selection there is: {} genes!\nBefore selection we had {} genes!'.format(selected_features.shape[0], X.shape[1]))
 

@@ -2,7 +2,7 @@ from skmultilearn.problem_transform import LabelPowerset, BinaryRelevance
 from skmultilearn.adapt import MLkNN
 from sklearn.multiclass import OneVsOneClassifier, OneVsRestClassifier
 from sklearn.multioutput import ClassifierChain
-from sklearn.preprocessing import LabelEncoder, LabelBinarizer, FunctionTransformer
+from sklearn.preprocessing import FunctionTransformer
 from sklearn.linear_model import LogisticRegression
 from sklearn.naive_bayes import GaussianNB, MultinomialNB
 from sklearn.pipeline import Pipeline
@@ -78,12 +78,41 @@ class MultiLabel_OnevsOne(MultiLabelClassification):
 
         return pd.DataFrame(preds)
     
+class MultiLabel_BinaryRelevance(MultiLabelClassification):
+
+    def __init__(self, X_train, y_train, X_test, y_test):
+        super().__init__(X_train, y_train, X_test, y_test)
+
+    def train_test(self):
+
+        preds = {}
+
+        base = LogisticRegression(solver='saga', n_jobs=-1)
+        clf = OneVsOneClassifier(base)
+
+
+        for label in self.labels:
+            print('Progress for predicting label {}...'.format(label))
+
+            clf.fit(self.X_train, self.y_train[label])
+            pred = clf.predict(self.X_test)
+
+            preds[label] = pred
+            
+            print('Test accuracy is {}\n'.format(accuracy_score(self.y_test[label], pred)))
+            print('Test recall is {}\n'.format(recall_score(self.y_test[label], pred)))
+            print('Test precision is {}\n'.format(precision_score(self.y_test[label], pred)))
+            print('Test f1 score is {}\n'.format(f1_score(self.y_test[label], pred)))
+
+        return pd.DataFrame(preds), clf
+    
+    
 class MultiLabel_Chains(MultiLabelClassification):
 
     def __init__(self, X_train, y_train, X_test, y_test):
         super().__init__(X_train, y_train, X_test, y_test)
 
-    def train_test(self, clf = GaussianNB()):
+    def train_test(self, clf = LogisticRegression(solver='saga')):
 
         classifier = clf
         chain = ClassifierChain(classifier) 
@@ -92,14 +121,14 @@ class MultiLabel_Chains(MultiLabelClassification):
         pred = chain.predict(self.X_test)
 
         print('\nTest accuracy: {}'.format(accuracy_score(self.y_test, pred)))
-        print('Test recall: {}'.format(recall_score(self.y_test, pred, average='macro', zero_division=1)))
-        print('Test precision: {}'.format(precision_score(self.y_test, pred, average='macro', zero_division=1)))
-        print('Test f1 score: {}'.format(f1_score(self.y_test, pred, average='macro', zero_division=1)))
+        print('Test recall: {}'.format(recall_score(self.y_test, pred, average='weighted', zero_division=1)))
+        print('Test precision: {}'.format(precision_score(self.y_test, pred, average='weighted', zero_division=1)))
+        print('Test f1 score: {}'.format(f1_score(self.y_test, pred, average='weighted', zero_division=1)))
 
         print('Test label-rank average precision score: {}\n'. 
               format(label_ranking_average_precision_score(self.y_test, pred)))
 
-        return pred
+        return pd.DataFrame(pred, columns=self.y_test.columns)
 
 
 class MultiLabel_Adapted(MultiLabelClassification):
@@ -114,14 +143,14 @@ class MultiLabel_Adapted(MultiLabelClassification):
         pred = classifier.predict(self.X_test.values)
 
         print('\nTest accuracy: {}'.format(accuracy_score(self.y_test, pred)))
-        print('Test recall: {}'.format(recall_score(self.y_test, pred, average='macro', zero_division=1)))
-        print('Test precision: {}'.format(precision_score(self.y_test, pred, average='macro', zero_division=1)))
-        print('Test f1 score: {}'.format(f1_score(self.y_test, pred, average='macro', zero_division=1)))
+        print('Test recall: {}'.format(recall_score(self.y_test, pred, average='weighted', zero_division=1)))
+        print('Test precision: {}'.format(precision_score(self.y_test, pred, average='weighted', zero_division=1)))
+        print('Test f1 score: {}'.format(f1_score(self.y_test, pred, average='weighted', zero_division=1)))
 
         print('Test label-rank average precision score: {}\n'. 
               format(label_ranking_average_precision_score(self.y_test, pred.toarray())))
 
-        return pred
+        return pd.DataFrame(pred.todense(), columns=self.y_test.columns)
 
 
 class MultiLabel_PowerSet(MultiLabelClassification):
@@ -141,21 +170,28 @@ class MultiLabel_PowerSet(MultiLabelClassification):
             'classifier__criterion': ['gini', 'entropy'],
             'classifier__n_estimators': [10, 20, 50],
             },
+            {
+            'classifier': [LogisticRegression()],
+            'classifier__tol': [1e-2, 1e-3],
+            'classifier__solver': ['lbfgs', 'sag'],
+            'classifier__C': [0.01, 0.1, 0.5, 1]
+            },
+
         ]   
 
-        clf = GridSearchCV(LabelPowerset(), parameters, scoring='f1_macro')
+        clf = GridSearchCV(LabelPowerset(), parameters, scoring='f1_weighted')
         clf.fit(X=self.X_train.values, y=self.y_train.values)
         pred = clf.predict(self.X_test.values)
 
         print('\nTest accuracy: {}'.format(accuracy_score(self.y_test, pred)))
-        print('Test recall: {}'.format(recall_score(self.y_test, pred, average='macro', zero_division=1)))
-        print('Test precision: {}'.format(precision_score(self.y_test, pred, average='macro', zero_division=1)))
-        print('Test f1 score: {}'.format(f1_score(self.y_test, pred, average='macro', zero_division=1)))
+        print('Test recall: {}'.format(recall_score(self.y_test, pred, average='weighted', zero_division=1)))
+        print('Test precision: {}'.format(precision_score(self.y_test, pred, average='weighted', zero_division=1)))
+        print('Test f1 score: {}'.format(f1_score(self.y_test, pred, average='weighted', zero_division=1)))
 
         print('Test label-rank average precision score: {}\n'. 
               format(label_ranking_average_precision_score(self.y_test, pred.toarray())))
 
-        return pred
+        return pd.DataFrame(pred.todense(), columns=self.y_test.columns)
 
 
 
@@ -175,7 +211,7 @@ if __name__ == '__main__':
     N_feats = 500
 
     # Feature selection can be: Univariate, Recursive...
-    FEAT_SELECT = 'Filter' 
+    FEAT_SELECT = 'Univariate' 
 
     # Get the current date and time
     now = datetime.datetime.now()
@@ -214,15 +250,26 @@ if __name__ == '__main__':
     X_test_scaled = pd.DataFrame(X_test_scaled, columns=X.columns)
 
     # Train and test
-    mlc = MultiLabel_PowerSet(X_train=X_train_scaled,
+    mlc = MultiLabel_BinaryRelevance(X_train=X_train_scaled,
                                X_test=X_test_scaled,
                                y_train=y_train, 
                                y_test=y_test)
     
-    predictions = mlc.train_test()
-    #print(predictions)
+    predictions, best_model = mlc.train_test()
+    print(predictions)
+    y_test = pd.get_dummies(y_test)[predictions.columns]
 
+    # Total scores
+    print('\nTest accuracy: {}'.format(accuracy_score(y_test, predictions)))
+    print('Test recall: {}'.format(recall_score(y_test, predictions, average='weighted', zero_division=1)))
+    print('Test precision: {}'.format(precision_score(y_test, predictions, average='weighted', zero_division=1)))
+    print('Test f1 score: {}'.format(f1_score(y_test, predictions, average='weighted', zero_division=1)))
 
+    print('Test recall: {}'.format(recall_score(y_test, predictions, average='macro', zero_division=1)))
+    print('Test precision: {}'.format(precision_score(y_test, predictions, average='macro', zero_division=1)))
+    print('Test f1 score: {}'.format(f1_score(y_test, predictions, average='macro', zero_division=1)))
+
+    print(best_model)
 
 
 
