@@ -1,9 +1,12 @@
 import matplotlib.pyplot as plt
 from sklearn.model_selection import cross_validate
 import numpy as np
-from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, matthews_corrcoef
+from sklearn.metrics import accuracy_score, f1_score, precision_score
+from sklearn.metrics import recall_score, matthews_corrcoef
 import torch
 from deeplearn_models import *
+import pandas as pd
+from sklearn.linear_model import LassoCV
 
 def log_transform(x):
     return np.log2(x + 0.1)
@@ -108,18 +111,26 @@ def plot_result(x_label, y_label, plot_title, train_data, val_data):
     plt.grid(True)
     plt.show()
 
-def forward_selection(data, target, significance_level=0.05):
-    initial_features = data.columns.tolist()
+def forward_selection(X_train, X_val, y_train, y_val):
+    """ 
+    Custom forward selection!
+        When score starts decreasing stops the algorithm 
+        and returns all features up till then.
+
+    """
+    remaining_features = X_train.columns
     best_features = []
-    while (len(initial_features)>0):
-        remaining_features = list(set(initial_features)-set(best_features))
-        new_pval = pd.Series(index=remaining_features)
-        for new_column in remaining_features:
-            model = sm.OLS(target, sm.add_constant(data[best_features+[new_column]])).fit()
-            new_pval[new_column] = model.pvalues[new_column]
-        min_p_value = new_pval.min()
-        if(min_p_value<significance_level):
-            best_features.append(new_pval.idxmin())
-        else:
+    past_val = 0.1
+    while (len(remaining_features)>0):
+        model = LassoCV(eps=0.001, cv=3)
+        model.fit(X_train[best_features+[remaining_features[0]]], y_train)
+        preds = model.predict(X_val)
+        new_val = f1_score(preds, y_val, average='weighted')
+        if(np.mean(new_val)<past_val):
             break
+        else:
+            best_features.append(remaining_features[0])
+            remaining_features.pop(0)
+            past_val = new_val
+
     return best_features
