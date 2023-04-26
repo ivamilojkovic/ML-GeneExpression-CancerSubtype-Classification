@@ -2,6 +2,47 @@ import pandas as pd
 from sklearn.utils import resample
 from imblearn.over_sampling import SMOTE 
 
+def remove_extreme(X: pd.DataFrame):
+    """
+        Removes extreme genes and finds potential samples to be removed!
+    """
+    cmp_X = X.divide(X.sum(axis=1), axis=0) * 1e6
+
+    # 1. Check presence of NULL values and remove genes that contain 80% of them
+    X_nans = cmp_X.isnull().sum(axis = 0)
+    X_nans_80 = (X_nans / cmp_X.shape[0]).gt(0.8)
+    X = X.loc[:, ~X_nans_80]
+
+    print('There are {} columns with more than 80% of Null values!'.\
+          format(X_nans_80.sum()))
+    
+    # 2. Check where the CMP values are lower than 4 for more than 20% of samples
+    X_4_keep = (X > 4).sum(axis=0)
+    X_4_20_keep = (X_4_keep / cmp_X.shape[0]).gt(0.2)
+    X = X.loc[:, X_4_20_keep]
+
+    print('There are {} columns with more than 20% of count values greater than 4!'.\
+          format(X_4_20_keep.sum()))
+    
+    # 3. Check if there are samples where the sum of the expression 
+    # values of the 5 most expressed genes is greater than the 20% of 
+    # the total expression of the sample
+
+    sample_sums = cmp_X.sum(axis=1)
+    top_5_sum = [sum(cmp_X.iloc[row, :].nlargest(5).tolist())*0.2 \
+                 for row in range(cmp_X.shape[0])]
+    
+    samples_to_remove = []
+    if (sample_sums<top_5_sum).sum():
+        print('There are {} samples that have total expression \
+              lower than 20% of sum of 5 most expressed genes!'.\
+                format((sample_sums<top_5_sum).sum()))
+        s = (sample_sums<top_5_sum)
+        samples_to_remove = s[s].index.values
+
+    return X, samples_to_remove 
+
+
 class ClassBalance:
     def __init__(self, X: pd.DataFrame, y: pd.Series):
         self.X = X
@@ -46,7 +87,7 @@ class ClassBalance:
         list_of_balanced = []
         for (class_label, balance_thresh) in balance_treshs.items():
 
-            resampled_data_class = resample(self.data[self.y==class_label], random_state=42, 
+            resampled_data_class = resample(self.data[self.y==class_label], 
                                             replace=True, n_samples=balance_thresh)
             list_of_balanced.append(resampled_data_class)
         
@@ -79,6 +120,8 @@ class ClassBalance:
         print(y_smote.value_counts())
 
         return pd.concat([X_smote, y_smote], axis=1)
+    
+
 
 
 

@@ -2,7 +2,7 @@ from sklearn.preprocessing import LabelEncoder, FunctionTransformer
 from sklearn.metrics import confusion_matrix
 from sklearn.model_selection import train_test_split, cross_val_score, GridSearchCV, KFold
 from sklearn.neural_network import MLPClassifier
-from sklearn.linear_model import LogisticRegression
+from sklearn.linear_model import LogisticRegression, Lasso
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.ensemble import RandomForestClassifier, ExtraTreesClassifier, AdaBoostClassifier
@@ -12,7 +12,7 @@ from mlxtend.feature_selection import SequentialFeatureSelector
 import os, pickle, datetime, time
 
 import pickle as pkl
-from data_preprocessing import ClassBalance
+from data_preprocessing import ClassBalance, remove_extreme
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
@@ -20,7 +20,7 @@ import numpy as np
 from utils import cmp_metrics
 import xgboost as xgb
 import lightgbm as lgb
-from utils import log_transform
+from utils import log_transform, plot_before_after_counts
 
 plt.style.use('ggplot')
 sns.set_theme()
@@ -34,18 +34,20 @@ def main():
     EXP_PATH = 'experiments'
 
     # Set the parameters
-    SOLVE_IMB = False # Solve class imbalance problem
+    SOLVE_IMB = True # Solve class imbalance problem
     TYPE_CI = 'case1'
     CROSS_VAL = False
     TEST_SIZE = 0.3
     RANDOM_STATE = 4
     OPTIM = True
+    DOWNSAMP_TEST = False
 
     N_folds = 10
     N_feats = 500
 
-    # Feature selection can be: Univariate, Recursive...
-    FEAT_SELECT = 'wrapper'
+    # Feature selection can be: 
+    # univariate, wrapper, embedded, hybrid...
+    FEAT_SELECT = 'univariate'
 
     # Get the current date and time
     now = datetime.datetime.now()
@@ -74,7 +76,7 @@ def main():
     #   AdaBoost
     #   }
 
-    MODEL_TYPE = 'KNN'
+    MODEL_TYPE = 'Random Forest'
 
     MODEL_PARAMS = {
         'MLP Classifier': {
@@ -157,14 +159,40 @@ def main():
     with open(DATASET_PATH, 'rb') as file:
         dataset = pkl.load(file) 
 
-    X = dataset.drop(columns=['expert_PAM50_subtype', 'tcga_id', 'sample_id', 'cancer_type'], inplace=False)
+    X = dataset.drop(columns=['expert_PAM50_subtype', 'tcga_id', \
+                              'sample_id', 'cancer_type'], inplace=False)
     y = dataset.expert_PAM50_subtype
 
+    # Remove extreme values (genes, samples)
+    X, potential_samples_to_remove = remove_extreme(X)
+
     # Split the dataset
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=TEST_SIZE, random_state=1, 
-                                                        shuffle=True, stratify=y)                  
+    X_train, X_test, y_train, y_test = \
+        train_test_split(X, y, test_size=TEST_SIZE, 
+                         random_state=1, shuffle=True, stratify=y)                  
     ax = y_train.value_counts().plot(kind='bar', title='Class label before')
     counts_before = y_train.value_counts().values
+
+    # Downsample testset - same number of samples in each class
+    if DOWNSAMP_TEST:
+        counts_test_before = y_test.value_counts()
+        min_num_samples = (y_test == 'Normal').sum()
+        sampling_strategy = {
+                'LumA': min_num_samples,
+                'LumB': min_num_samples,
+                'Basal': min_num_samples,
+                'Her2': min_num_samples,
+                'Normal': min_num_samples
+            }
+        cb = ClassBalance(X=X_test, y=y_test)
+        uniform_test = cb.resampling(sampling_strategy)
+
+        X_test = uniform_test.drop(columns='expert_PAM50_subtype', inplace=False)
+        y_test = uniform_test.expert_PAM50_subtype
+        counts_test_after = y_test.value_counts()
+
+        # Plot class balance difference 
+        plot_before_after_counts(counts_test_before, counts_test_after)
 
     # Solve data imbalance issue
     if SOLVE_IMB:
@@ -207,39 +235,14 @@ def main():
             balanced_dataset = cb.resampling_with_generation(sampling_strategy)
             experiment_params['class_balance_thresholds'] = sampling_strategy
 
+            # TODO: Correct plotting here
+            #ax = df.plot.bar(stacked=False)
+
         X_train = balanced_dataset.drop(columns='expert_PAM50_subtype', inplace=False)
         y_train = balanced_dataset.expert_PAM50_subtype
 
         # Plot class balance difference 
-        df_before = pd.DataFrame({'Class': list(counts_after.index),
-                                'Counts': counts_before,
-                                'Type': ['Before']*5
-                                })
-        df_after = pd.DataFrame({'Class': list(counts_after.index),
-                                'Counts': counts_after,
-                                'Type': ['After']*5
-                                })
-
-        df = pd.concat([df_before, df_after], ignore_index=True)
-
-        ax = plt.figure()
-        ax = sns.barplot(
-                x = "Class",
-                y = "Counts",
-                hue = "Type",
-                data = df
-                )
-        for g in ax.patches:
-            ax.annotate(format(g.get_height(), '.0f'),
-                        (g.get_x() + g.get_width() / 2., g.get_height()),
-                        ha = 'center', va = 'center',
-                        xytext = (0, 5),
-                        textcoords = 'offset points',
-                        fontsize=8)
-            
-        ax.tick_params(axis='x', rotation=30)
-        ax.set_title('Class balance before and after')
-        #ax = df.plot.bar(stacked=False)
+        plot_before_after_counts(counts_before, counts_after)
 
     # Encode the class labels
     LB = LabelEncoder()
@@ -256,7 +259,7 @@ def main():
     X_test_scaled = pd.DataFrame(X_test_scaled, columns=X.columns)
 
     # Feature selection
-    if FEAT_SELECT == 'Univariate':
+    if FEAT_SELECT == 'univariate':
         best_feat_model = SelectKBest(score_func=f_classif, k=N_feats) # k needs to be defined
         best_feat_model.fit(X_train_scaled, y_train)
         df_scores = pd.DataFrame(best_feat_model.scores_)
@@ -272,12 +275,29 @@ def main():
 
         selected_feat = featureScores.sort_values(by='Score')[-N_feats:]['Feature']
     
-    elif FEAT_SELECT == 'Filter':
+    elif FEAT_SELECT == 'hybrid':
+        best_feat_model = SelectKBest(score_func=f_classif, k=N_feats) # k needs to be defined
+        best_feat_model.fit(X_train_scaled, y_train)
+        mask = best_feat_model.get_support()
+        selected_feat = X.columns[mask]
+        X_selected = X_train_scaled[selected_feat]
+
+        # Now apply backward feature elimination
+        model = DecisionTreeClassifier(criterion='log_loss', random_state=42)
+        selector = SequentialFeatureSelector(model, k_features=10, 
+                                            forward=False, verbose=2,
+                                            floating=False, cv=3, 
+                                            scoring='f1_weighted', n_jobs=-1)
+        selector.fit(X_selected, y_train)
+        selected_feat = list(selector.k_feature_names_)
+
+    elif FEAT_SELECT == 'filter':
         with open('high_corr_feat.pkl', 'rb') as file:
             selected_feat = pickle.load(file)
 
-    elif FEAT_SELECT == 'Recursive':
-        rfe_selector = RFE(estimator=LogisticRegression(), n_features_to_select=N_feats, step=10, verbose=5)
+    elif FEAT_SELECT == 'recursive':
+        rfe_selector = RFE(estimator=LogisticRegression(), 
+                           n_features_to_select=N_feats, step=10, verbose=5)
         rfe_selector.fit(X_train_scaled, y_train)
         rfe_support = rfe_selector.get_support()
 
@@ -305,20 +325,29 @@ def main():
         selected_feat = X_train_scaled.columns[selector.get_support()]
 
     elif FEAT_SELECT == 'wrapper':
-        # Forward Feature Selection
-        model = RandomForestClassifier(n_estimators=100, 
-                                       criterion='log_loss', 
-                                       random_state=42)
-        selector = SequentialFeatureSelector(model, k_features=50, 
-                                            forward=True, verbose=2,
-                                            floating=False, cv=3, 
-                                            scoring='f1_weighted')
+        if os.path.exists('feat50.pkl'):
+            with open('feat50.pkl', 'rb') as f:
+                selected_feat = pickle.load(f)
+        else:
+            # Forward Feature Selection
+            model = DecisionTreeClassifier(criterion='log_loss', random_state=42)
+            selector = SequentialFeatureSelector(model, k_features=50, 
+                                                forward=True, verbose=2,
+                                                floating=False, cv=3, 
+                                                scoring='f1_weighted', n_jobs=-1)
+            selector.fit(X_train_scaled, y_train)
+            selected_feat = list(selector.k_feature_names_)
+    
+    elif FEAT_SELECT == 'wrapper_reg':
+        model = Lasso(alpha=0.0001, random_state=42)
+        selector = SelectFromModel(model, threshold=0.001) 
+        selector.fit_transform(X_train_scaled, y_train)
         selector.fit(X_train_scaled, y_train)
-        selected_feat = selector.k_feature_names_
+        selected_feat = X_train_scaled.columns[selector.get_support()]
 
     # Extract the data frames with only selected features
-    X_train_scaled_selected = X_train_scaled[selected_feat]
-    X_test_scaled_selected = X_test_scaled[selected_feat]
+    X_train_scaled_selected = X_train_scaled[list(selected_feat)]
+    X_test_scaled_selected = X_test_scaled[list(selected_feat)]
 
     # Define a model
     if MODEL_TYPE == 'MLP Classifier': 
@@ -361,6 +390,7 @@ def main():
         model = gs.best_estimator_
         best_params = gs.best_params_
         experiment_params['model_params'] = best_params
+        experiment_name['best_model'] = model
 
     else:
         start = time.time()

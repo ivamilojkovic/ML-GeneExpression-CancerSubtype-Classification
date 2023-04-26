@@ -7,6 +7,7 @@ import torch
 from deeplearn_models import *
 import pandas as pd
 from sklearn.linear_model import LassoCV
+import seaborn as sns
 
 def log_transform(x):
     return np.log2(x + 0.1)
@@ -134,3 +135,33 @@ def forward_selection(X_train, X_val, y_train, y_val):
             past_val = new_val
 
     return best_features
+
+def plot_before_after_counts(counts_before, counts_after):
+    df_before = pd.DataFrame({'Class': list(counts_after.index),
+                            'Counts': counts_before,
+                            'Type': ['Before']*5
+                            })
+    df_after = pd.DataFrame({'Class': list(counts_after.index),
+                            'Counts': counts_after,
+                            'Type': ['After']*5
+                            })
+
+    df = pd.concat([df_before, df_after], ignore_index=True)
+
+    ax = plt.figure()
+    ax = sns.barplot(
+            x = "Class",
+            y = "Counts",
+            hue = "Type",
+            data = df
+            )
+    for g in ax.patches:
+        ax.annotate(format(g.get_height(), '.0f'),
+                    (g.get_x() + g.get_width() / 2., g.get_height()),
+                    ha = 'center', va = 'center',
+                    xytext = (0, 5),
+                    textcoords = 'offset points',
+                    fontsize=8)
+        
+    ax.tick_params(axis='x', rotation=30)
+    ax.set_title('Class balance before and after')
