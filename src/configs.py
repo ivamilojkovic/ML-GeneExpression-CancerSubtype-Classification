@@ -17,3 +17,4 @@ model_enc_params = {
     "hidden_shape": 1024,
     "latent_shape": 128 
 }
+

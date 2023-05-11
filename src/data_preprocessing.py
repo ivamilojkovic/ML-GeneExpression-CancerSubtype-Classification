@@ -2,7 +2,7 @@ import pandas as pd
 from sklearn.utils import resample
 from imblearn.over_sampling import SMOTE 
 
-def remove_extreme(X: pd.DataFrame):
+def remove_extreme(X: pd.DataFrame, change_X = True):
     """
         Removes extreme genes and finds potential samples to be removed!
     """
@@ -19,7 +19,10 @@ def remove_extreme(X: pd.DataFrame):
     # 2. Check where the CMP values are lower than 4 for more than 20% of samples
     X_4_keep = (X > 4).sum(axis=0)
     X_4_20_keep = (X_4_keep / cmp_X.shape[0]).gt(0.2)
-    X = X.loc[:, X_4_20_keep]
+    feat_to_remove = set(X.columns).difference(set(X.loc[:, X_4_20_keep].columns))
+    feat_to_keep = X.loc[:, X_4_20_keep].columns
+    if change_X:
+        X = X.loc[:, X_4_20_keep]
 
     print('There are {} columns with more than 20% of count values greater than 4!'.\
           format(X_4_20_keep.sum()))
@@ -40,7 +43,7 @@ def remove_extreme(X: pd.DataFrame):
         s = (sample_sums<top_5_sum)
         samples_to_remove = s[s].index.values
 
-    return X, samples_to_remove 
+    return X, samples_to_remove, feat_to_remove, feat_to_keep
 
 
 class ClassBalance:
@@ -52,7 +55,7 @@ class ClassBalance:
     def cut_LumA(self, thresh: float):
         resampled_data = resample(self.data.loc[self.y=='LumA',:], 
                                     random_state=42, 
-                                    replace=True,
+                                    replace=False,
                                     n_samples=thresh)
         resampled_data = pd.concat([self.data.loc[self.y!='LumA',:], resampled_data])
         return resampled_data
@@ -60,15 +63,15 @@ class ClassBalance:
     def cut_LumA_LumB_Basal(self, thresh):
         resampled_lumA = resample(self.data.loc[self.y=='LumA',:], 
                                     random_state=42, 
-                                    replace=True,
+                                    replace=False,
                                     n_samples=thresh[0])
         resampled_lumB = resample(self.data.loc[self.y=='LumB',:], 
                                     random_state=42, 
-                                    replace=True,
+                                    replace=False,
                                     n_samples=thresh[1])
         resampled_basal = resample(self.data.loc[self.y=='Basal',:], 
                                     random_state=42, 
-                                    replace=True,
+                                    replace=False,
                                     n_samples=thresh[2])
         
         rest = (self.y!='LumA').values & (self.y!='LumB').values & (self.y!='Basal').values
@@ -84,18 +87,21 @@ class ClassBalance:
 
     def resampling(self, balance_treshs: dict):
 
-        list_of_balanced = []
+        idx_sampled = []
         for (class_label, balance_thresh) in balance_treshs.items():
 
-            resampled_data_class = resample(self.data[self.y==class_label], 
-                                            replace=True, n_samples=balance_thresh)
-            list_of_balanced.append(resampled_data_class)
+            idx_sampled += list(resample(self.y[self.y==class_label].index, 
+                                    replace=False, 
+                                    n_samples=balance_thresh))
+            
+        #     resampled_data_class = 
+        #     list_of_balanced.append(resampled_data_class)
         
-        resampled_data = pd.concat(list_of_balanced)
+        # resampled_data = pd.concat(list_of_balanced)
 
-        print(resampled_data.expert_PAM50_subtype.value_counts())
+        # print(resampled_data.expert_PAM50_subtype.value_counts())
 
-        return resampled_data
+        return self.data.loc[idx_sampled, :]
 
     def resampling_with_generation(self, sampling_strategy: dict):
 
@@ -103,8 +109,10 @@ class ClassBalance:
         for (label, value) in sampling_strategy.items():
             counts = (self.y==label).sum()
             if  counts > value:
-                downsampled_data = resample(self.data[self.y==label], random_state=42, 
-                                            replace=True, n_samples=value)
+                downsampled_data = resample(self.data[self.y==label], 
+                                            random_state=42, 
+                                            replace=False, 
+                                            n_samples=value)
                 new_list_data.append(downsampled_data)
             else:
                 new_list_data.append(self.data[self.y==label])
@@ -116,10 +124,12 @@ class ClassBalance:
         smote = SMOTE(sampling_strategy=sampling_strategy, random_state=42, k_neighbors=5)
         X_smote, y_smote = smote.fit_resample(X, y.ravel())
         y_smote = pd.DataFrame(y_smote, columns=['expert_PAM50_subtype'])
+    
+        new_samples = pd.concat([X, X_smote]).drop_duplicates(keep=False)
         print('Balance status after SMOTE:\n')
         print(y_smote.value_counts())
 
-        return pd.concat([X_smote, y_smote], axis=1)
+        return pd.concat([X_smote, y_smote], axis=1), new_samples
     
 
 

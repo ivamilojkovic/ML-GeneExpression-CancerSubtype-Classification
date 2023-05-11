@@ -1,0 +1,25 @@
+
+# Feature selection can be: 
+# univariate, wrapper, embedded, hybrid...
+
+train:
+  solve_class_imbalance: True # Not solving CI problem corresponds  to case0
+  type_class_imbalance: 'case1' # ['case1', 'case2', 'case3', 'case4']
+  cross_val: False
+  test_size: 0.3
+  random_state: 4
+  optim: True
+  grid_scoring: 'accuracy'
+  downsample_test: False
+  num_folds: 10
+  num_feat: 500
+  type_feat_selection: 'univariate' # ['univariate', 'wrapper', 'embedded', 'hybrid']
+
+paths:
+  dataset: ${hydra:runtime.cwd}/tcga_brca_raw_19036_1053samples.pkl
+  experiment: ${hydra:runtime.cwd}/experiments
+  model: ${hydra:runtime.cwd}/models
+  images: ${hydra:runtime.cwd}/images
+
+
+
