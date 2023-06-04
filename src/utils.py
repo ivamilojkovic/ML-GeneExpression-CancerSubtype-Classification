@@ -13,6 +13,47 @@ import seaborn as sns
 plt.rcParams.update({'font.size': 12})
 matplotlib.rcParams['xtick.labelsize'] = 12
 
+def discard_negative_correlations(dataset):
+
+    """ Set all negative correlation values to zero.
+    """
+
+    dataset['LumA'][dataset['LumA'] < 0] = 0
+    dataset['LumB'][dataset['LumB'] < 0] = 0
+    dataset['Basal'][dataset['Basal'] < 0] = 0
+    dataset['Her2'][dataset['Her2'] < 0] = 0
+    dataset['Normal'][dataset['Normal'] < 0] = 0
+
+    return dataset
+
+def m_cut_strategy_class_assignment(data, non_neg_values=False):
+
+    """ Given the predicted probabilities from the classifier or correlations, 
+        the M-cut strategy is performed to assign each sample one or more labels.
+    """
+
+    if non_neg_values:
+        data = discard_negative_correlations(data)
+
+    assigned_labels = []
+
+    for row in range(data.shape[0]):
+        sample = data.iloc[row, :]
+        sample_sorted = np.sort(sample)
+        sort_idx = np.argmax(sample)
+
+        prob_diff = sample_sorted[1:] - sample_sorted[:-1]
+        max_diff_idx = np.argmax(prob_diff)
+        
+        m_cut_thresh = (sample_sorted[max_diff_idx] + sample_sorted[max_diff_idx+1])/2
+        new_row = (sample>m_cut_thresh).astype(int)
+        assigned_labels.append(new_row)
+
+    return pd.DataFrame(assigned_labels, columns=data.columns)
+        
+
+
+
 def log_transform(x):
     return np.log2(x + 0.1)
 

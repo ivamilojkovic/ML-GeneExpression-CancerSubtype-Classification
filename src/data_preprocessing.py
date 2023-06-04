@@ -1,6 +1,6 @@
 import pandas as pd
 from sklearn.utils import resample
-from imblearn.over_sampling import SMOTE 
+#from imblearn.over_sampling import SMOTE 
 
 def remove_extreme(X: pd.DataFrame, change_X = True):
     """
@@ -85,21 +85,14 @@ class ClassBalance:
         return pd.concat([X_smote, y_smote], axis=1)
 
 
-    def resampling(self, balance_treshs: dict):
+    def resampling(self, balance_treshs: dict, seed=None):
 
         idx_sampled = []
         for (class_label, balance_thresh) in balance_treshs.items():
 
             idx_sampled += list(resample(self.y[self.y==class_label].index, 
-                                    replace=False, 
-                                    n_samples=balance_thresh))
-            
-        #     resampled_data_class = 
-        #     list_of_balanced.append(resampled_data_class)
-        
-        # resampled_data = pd.concat(list_of_balanced)
-
-        # print(resampled_data.expert_PAM50_subtype.value_counts())
+                                    replace=False, random_state=seed,
+                                    n_samples=int(balance_thresh)))
 
         return self.data.loc[idx_sampled, :]
 

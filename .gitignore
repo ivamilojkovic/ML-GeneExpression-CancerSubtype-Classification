@@ -12,6 +12,8 @@
 
 # Ignore dataset
 *.pkl
+*.csv
+*.xlsx
 
 # Ignore presentation
 *.pptx

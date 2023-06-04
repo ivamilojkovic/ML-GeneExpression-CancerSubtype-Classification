@@ -3,12 +3,14 @@
 # univariate, wrapper, embedded, hybrid...
 
 train:
-  solve_class_imbalance: True # Not solving CI problem corresponds  to case0
+  solve_class_imbalance: False # Not solving CI problem corresponds  to case0
   type_class_imbalance: 'case1' # ['case1', 'case2', 'case3', 'case4']
+  thresh_lumA: 200 # [case1a -> 200, case1b -> 225, case1c -> 250, 175]
   cross_val: False
   test_size: 0.3
   random_state: 4
-  optim: True
+  random_state_split: 1
+  optim: False
   grid_scoring: 'accuracy'
   downsample_test: False
   num_folds: 10
@@ -20,6 +22,7 @@ paths:
   experiment: ${hydra:runtime.cwd}/experiments
   model: ${hydra:runtime.cwd}/models
   images: ${hydra:runtime.cwd}/images
+  artefacts: ${hydra:runtime.cwd}/artefacts
 
 
 

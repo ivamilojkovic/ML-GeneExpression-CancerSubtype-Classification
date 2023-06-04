@@ -8,7 +8,7 @@ from sklearn.tree import DecisionTreeClassifier
 from sklearn.ensemble import RandomForestClassifier, ExtraTreesClassifier, AdaBoostClassifier
 from sklearn.svm import SVC
 from sklearn.feature_selection import SelectFromModel, SelectKBest, RFE, f_classif, chi2
-from mlxtend.feature_selection import SequentialFeatureSelector
+#from mlxtend.feature_selection import SequentialFeatureSelector
 import os, pickle, datetime, time
 
 import pickle as pkl
@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
 import numpy as np
-from utils import cmp_metrics
+from utils import cmp_metrics, m_cut_strategy_class_assignment
 import xgboost as xgb
 import lightgbm as lgb
 from utils import log_transform, plot_before_after_counts, plot_pca
@@ -64,22 +64,29 @@ def main(cfg: ProjectConfig):
     # Split the dataset
     X_train, X_test, y_train, y_test = \
         train_test_split(X, y, test_size=cfg.train.test_size, 
-                        random_state=1, shuffle=True, stratify=y)                  
+                        random_state=cfg.train.random_state_split, shuffle=True, stratify=y)    
+
     ax = y_train.value_counts().plot(kind='bar', title='Class label before')
     counts_before = y_train.value_counts().values
     counts_test_before = y_test.value_counts().values
+    ax.tick_params(axis='x', rotation=30)
 
     # Solve data imbalance issue
     if cfg.train.solve_class_imbalance:
         cb = ClassBalance(X=X_train, y=y_train)
+        # cb_test = ClassBalance(X=X_test, y=y_test)
         if cfg.train.type_class_imbalance == 'case1':
-            balanced_dataset = cb.cut_LumA(thresh=225)
-            counts_after = balanced_dataset.expert_PAM50_subtype.value_counts()
+            balanced_dataset = cb.cut_LumA(thresh=cfg.train.thresh_lumA)
+            # counts_after = balanced_dataset.expert_PAM50_subtype.value_counts()
+            # ratios_after = counts_after/sum(counts_after)
+            # thresh_new = np.floor(X_test.shape[0]*ratios_after)
+            # new_test_set = cb_test.resampling(
+            #     balance_treshs=thresh_new, seed=42)
 
         elif cfg.train.type_class_imbalance == 'case2':
             balanced_dataset = cb.cut_LumA_LumB_Basal(thresh=[100, 100, 80])
             counts_after = balanced_dataset.expert_PAM50_subtype.value_counts()
-
+            
         elif cfg.train.type_class_imbalance == 'case3':
             sampling_strategy = {
                 'LumA': 100,
@@ -322,11 +329,11 @@ def main(cfg: ProjectConfig):
     #   AdaBoost
     #   }
 
-    MODEL_TYPES = ['Logistic Regression', 'KNN', 'Decision Tree', 
-                   'SVC', 'Random Forest', 'XGBoost', 
-                   'LightGBM', 'AdaBoost']
-    
-    #MODEL_TYPES = ['Logistic Regression']
+    # MODEL_TYPES = ['Logistic Regression', 'KNN', 'Decision Tree', 
+    #                'SVC', 'Random Forest', 'XGBoost', 
+    #                'LightGBM', 'AdaBoost']
+
+    MODEL_TYPES = ['XGBoost']
 
     for MODEL_TYPE in MODEL_TYPES:
 
@@ -358,11 +365,25 @@ def main(cfg: ProjectConfig):
             'n_features_to_select': cfg.train.num_feat,
             'test_size': cfg.train.test_size,
             'feature_selection_method': cfg.train.type_feat_selection,
-            'optimized': cfg.train.optim
+            'optimized': cfg.train.optim,
+            'threshold_cut_LumA': cfg.train.thresh_lumA
         }
 
         experiment_params['model_type'] = MODEL_TYPE
         mlflow.log_param("model_type", MODEL_TYPE)
+
+        if cfg.train.type_class_imbalance == 'case1':
+            if cfg.train.thresh_lumA == 200:
+                case_name = cfg.train.type_class_imbalance + 'a'
+            elif cfg.train.thresh_lumA == 225:
+                case_name = cfg.train.type_class_imbalance + 'b'
+            elif cfg.train.thresh_lumA == 250:
+                case_name = cfg.train.type_class_imbalance + 'c'
+            elif cfg.train.thresh_lumA == 175:
+                case_name = cfg.train.type_class_imbalance + 'd'
+        else:
+            case_name = cfg.train.type_class_imbalance
+        
 
         #####################################################################
         ############################  MAIN PART #############################
@@ -376,6 +397,16 @@ def main(cfg: ProjectConfig):
             if cfg.train.optim:
                 classifier = LogisticRegression(random_state=cfg.train.random_state)
             else:
+                if cfg.train.type_class_imbalance=='case1': 
+                    if cfg.train.thresh_lumA == 200:
+                        exp_name = 'run_09-05-2023_02:29:40'
+                    elif cfg.train.thresh_lumA == 225:
+                        exp_name = 'run_11-05-2023_01:10:33'
+                    elif cfg.train.thresh_lumA == 250:
+                        exp_name = 'run_11-05-2023_19:37:56'
+                    elif cfg.train.thresh_lumA == 175:
+                        exp_name = 'run_09-05-2023_20:51:26'
+
                 if cfg.train.type_class_imbalance=='case2':
                     exp_name = 'run_09-05-2023_20:51:26'
                 elif cfg.train.type_class_imbalance=='case3':
@@ -437,6 +468,12 @@ def main(cfg: ProjectConfig):
                                     scoring='neg_log_loss', 
                                     cv=cfg.train.num_folds, verbose=5)
             
+
+        # Save data for training and testing
+        with open(os.path.join(cfg.paths.artefacts, experiment_name + '.pkl'), 'wb') as file:
+            pickle.dump([X_train_scaled_selected, LB.inverse_transform(y_train),
+                         X_test_scaled_selected, LB.inverse_transform(y_test)], file)
+            
         # ----------------- TRAIN & TEST ------------------
         if cfg.train.optim:
             # Define Grid Search
@@ -467,6 +504,7 @@ def main(cfg: ProjectConfig):
         
         # --------------- Compute predictions ------------------
         pred_train = model.predict(X_train_scaled_selected.values)
+        pred_prob = model.predict_proba(X_train_scaled_selected.values)
         if cfg.train.downsample_test:
             prec_s, rec_s, f1_s = [], [], []
             for i in range(N_iter):
@@ -497,13 +535,17 @@ def main(cfg: ProjectConfig):
                 ax = df_lr.plot(kind='bar', rot=30, title='Scores for ' + 'case-0' +' best model',
                                 yerr=[std_prec, std_rec, std_f1])
             else:
-                ax = df_lr.plot(kind='bar', rot=30, title='Scores for ' + cfg.train.type_class_imbalance +' best model',
+                ax = df_lr.plot(kind='bar', rot=30, title='Scores for ' + case_name +' best model',
                                 yerr=[std_prec, std_rec, std_f1])
             plt.legend(loc='lower right')
             print()
 
         else:
             pred = model.predict(X_test_scaled_selected.values)
+            prob_pred = model.predict_proba(X_test_scaled_selected.values)
+
+            # ---------------- M-cut strategy ----------------------
+            m_cut_labels = m_cut_strategy_class_assignment(prob_pred, non_neg_values=True)
         
             # ---------------- Compute metrics ---------------------
             test_metrics = cmp_metrics(pred, y_test)
@@ -516,7 +558,7 @@ def main(cfg: ProjectConfig):
                             'Recall': test_metrics['Recall per class'],
                             'F1 score': test_metrics['F1 score per class']}, 
                             index=['LumA', 'LumB', 'Basal', 'Her2', 'Normal'])
-            ax = df_lr.plot(kind='bar', rot=30, title='Scores for ' + cfg.train.type_class_imbalance +' best model')
+            ax = df_lr.plot(kind='bar', rot=30, title='Scores for ' + case_name +' best model')
             plt.legend(loc='lower right')
 
             # ----------------- Track metrics -------------------
@@ -532,11 +574,28 @@ def main(cfg: ProjectConfig):
             mlflow.log_metric("mcc", test_metrics['MCC'])
             #mlflow.log_metric("ROC AUC", test_metrics['ROC_AUC'])
 
-            conf_mat = confusion_matrix(y_test, pred)        
+            # Plot confusion matrix
+            conf_mat = confusion_matrix(y_test, pred) 
+            conf_mat_percentage = conf_mat / conf_mat.sum(axis=1)  
+
+            class_cnts = ['{0:0.0f}'.format(value) for value in conf_mat.flatten()]
+
+            class_percentages = ['{0:.2%}'.format(value) for value in conf_mat_percentage.flatten()]    
+            labels = [f'{v1}\n{v2}' for \
+                      v1, v2 in zip(class_cnts, class_percentages)]
+            labels = np.asarray(labels).reshape(5,5)
 
             fig = plt.figure()
-            df = pd.DataFrame(conf_mat, index = [i for i in LB.classes_], columns = [i for i in LB.classes_])
-            sns.heatmap(df.div(df.values.sum()), annot=True)
+            df = pd.DataFrame(conf_mat_percentage, index = [i for i in LB.classes_], columns = [i for i in LB.classes_])
+            #sns.heatmap(df.div(df.values.sum()), annot=True)
+            sns.heatmap(df, annot=labels, fmt='', cmap='Greens')
+            if not cfg.train.solve_class_imbalance:
+                plt.title('Confusion matrix for ' + 'case-0' +' best model')
+            else:
+                plt.title('Confusion matrix for ' + case_name + ' best model')
+            
+            plt.ylabel('True class')
+            plt.xlabel('Predicted class')
             plt.show()
 
         # Save the experiment properties as .pkl file

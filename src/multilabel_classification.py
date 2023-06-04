@@ -15,6 +15,8 @@ from sklearn.model_selection import train_test_split, GridSearchCV
 from utils import log_transform
 import pandas as pd
 import numpy as np
+from scipy.sparse import csr_matrix, lil_matrix
+import xgboost as xgb
 
 class MultiLabelClassification():
     def __init__(self, X_train, y_train, X_test, y_test):
@@ -22,27 +24,36 @@ class MultiLabelClassification():
         self.X_train = X_train
         self.X_test = X_test
 
-        self.labels = y_train.unique()
+        #self.labels = np.unique(y_train)
+        self.labels = y_train.columns
 
-        self.y_train = pd.get_dummies(y_train)
-        self.y_test = pd.get_dummies(y_test)
+#        self.y_train = pd.get_dummies(y_train)
+#        self.y_test = pd.get_dummies(y_test)
+        self.y_train = y_train
+        self.y_test = y_test
 
 class MultiLabel_OnevsRest(MultiLabelClassification):
 
     def __init__(self, X_train, y_train, X_test, y_test):
         super().__init__(X_train, y_train, X_test, y_test)
 
-    def train_test(self):
+    def train_test(self, model):
 
         preds = {}
+
+        # If model XGBoost
+        xgb_param = model.get_xgb_params()
+        extra = {'objective': 'binary:logistic'}
+        xgb_param.update(extra)
+
+        model = xgb.XGBClassifier(**xgb_param)
         
-        class_pipe = Pipeline([('clf', OneVsRestClassifier(LogisticRegression(solver='saga', n_jobs=-1)))])
+        class_pipe = Pipeline([('clf', OneVsRestClassifier(model))])
         for label in self.labels:
             print('Progress for predicting label {}...'.format(label))
 
             class_pipe.fit(self.X_train, self.y_train[label])
             pred = class_pipe.predict(self.X_test)
-
             preds[label] = pred
             
             print('Test accuracy is {}\n'.format(accuracy_score(self.y_test[label], pred)))
@@ -50,19 +61,24 @@ class MultiLabel_OnevsRest(MultiLabelClassification):
             print('Test precision is {}\n'.format(precision_score(self.y_test[label], pred)))
             print('Test f1 score is {}\n'.format(f1_score(self.y_test[label], pred)))
 
-        return pd.DataFrame(preds)
+        return pd.DataFrame(preds, columns=self.labels)
     
 class MultiLabel_OnevsOne(MultiLabelClassification):
 
     def __init__(self, X_train, y_train, X_test, y_test):
         super().__init__(X_train, y_train, X_test, y_test)
 
-    def train_test(self):
+    def train_test(self, model):
+
+        # If model XGBoost
+        xgb_param = model.get_xgb_params()
+        extra = {'objective': 'binary:logistic'}
+        xgb_param.update(extra)
+
+        model = xgb.XGBClassifier(**xgb_param)
+        class_pipe = Pipeline([('clf', OneVsOneClassifier(model))])
 
         preds = {}
-
-        class_pipe = Pipeline([('clf', OneVsOneClassifier(LogisticRegression(solver='saga', n_jobs=-1)))])
-
         for label in self.labels:
             print('Progress for predicting label {}...'.format(label))
 
@@ -76,20 +92,24 @@ class MultiLabel_OnevsOne(MultiLabelClassification):
             print('Test precision is {}\n'.format(precision_score(self.y_test[label], pred)))
             print('Test f1 score is {}\n'.format(f1_score(self.y_test[label], pred)))
 
-        return pd.DataFrame(preds)
+        return pd.DataFrame(preds, columns=self.labels)
     
 class MultiLabel_BinaryRelevance(MultiLabelClassification):
 
     def __init__(self, X_train, y_train, X_test, y_test):
         super().__init__(X_train, y_train, X_test, y_test)
 
-    def train_test(self):
+    def train_test(self, model):
 
-        preds = {}
+        preds = []
 
-        base = LogisticRegression(solver='saga', n_jobs=-1)
+        # If model XGBoost
+        xgb_param = model.get_xgb_params()
+        extra = {'objective': 'binary:logistic'}
+        xgb_param.update(extra)
+
+        base = xgb.XGBClassifier(**xgb_param)
         clf = OneVsOneClassifier(base)
-
 
         for label in self.labels:
             print('Progress for predicting label {}...'.format(label))
@@ -97,14 +117,14 @@ class MultiLabel_BinaryRelevance(MultiLabelClassification):
             clf.fit(self.X_train, self.y_train[label])
             pred = clf.predict(self.X_test)
 
-            preds[label] = pred
+            preds.append(pred)
             
             print('Test accuracy is {}\n'.format(accuracy_score(self.y_test[label], pred)))
             print('Test recall is {}\n'.format(recall_score(self.y_test[label], pred)))
             print('Test precision is {}\n'.format(precision_score(self.y_test[label], pred)))
             print('Test f1 score is {}\n'.format(f1_score(self.y_test[label], pred)))
 
-        return pd.DataFrame(preds), clf
+        return pd.DataFrame(np.transpose(preds), columns=self.labels)
     
     
 class MultiLabel_Chains(MultiLabelClassification):
@@ -138,14 +158,12 @@ class MultiLabel_Adapted(MultiLabelClassification):
 
     def train_test(self):
 
-        classifier = MLkNN(k=20)
-        classifier.fit(X=self.X_train.values, y=self.y_train.values)
-        pred = classifier.predict(self.X_test.values)
+        x_train = lil_matrix(self.X_train.values).toarray()
+        y_train = lil_matrix(self.y_train.values).toarray()
 
-        print('\nTest accuracy: {}'.format(accuracy_score(self.y_test, pred)))
-        print('Test recall: {}'.format(recall_score(self.y_test, pred, average='weighted', zero_division=1)))
-        print('Test precision: {}'.format(precision_score(self.y_test, pred, average='weighted', zero_division=1)))
-        print('Test f1 score: {}'.format(f1_score(self.y_test, pred, average='weighted', zero_division=1)))
+        classifier = MLkNN(k=20)
+        classifier.fit(x_train, y_train)
+        pred = classifier.predict(self.X_test.values)
 
         print('Test label-rank average precision score: {}\n'. 
               format(label_ranking_average_precision_score(self.y_test, pred.toarray())))
@@ -180,7 +198,7 @@ class MultiLabel_PowerSet(MultiLabelClassification):
         ]   
 
         clf = GridSearchCV(LabelPowerset(), parameters, scoring='f1_weighted')
-        clf.fit(X=self.X_train.values, y=self.y_train.values)
+        clf.fit(X=self.X_train.values, y=self.y_train)
         pred = clf.predict(self.X_test.values)
 
         print('\nTest accuracy: {}'.format(accuracy_score(self.y_test, pred)))
@@ -192,88 +210,4 @@ class MultiLabel_PowerSet(MultiLabelClassification):
               format(label_ranking_average_precision_score(self.y_test, pred.toarray())))
 
         return pd.DataFrame(pred.todense(), columns=self.y_test.columns)
-
-
-
-if __name__ == '__main__':
-
-    EXP_PATH = 'experiments'
-
-    # Set the parameters
-    SOLVE_IMB = False # Solve class imbalance problem
-    SMOTE = True
-    CROSS_VAL = False
-    TEST_SIZE = 0.3
-    RANDOM_STATE = 4
-    OPTIM = False
-
-    N_folds = 10
-    N_feats = 500
-
-    # Feature selection can be: Univariate, Recursive...
-    FEAT_SELECT = 'Univariate' 
-
-    # Get the current date and time
-    now = datetime.datetime.now()
-    experiment_name =  'run_' + now.strftime("%d-%m-%Y_%H:%M:%S")
-    experiment_params = {
-        'solve_ibm': SOLVE_IMB,
-        'use_smote': SMOTE,
-        'cross_validation': CROSS_VAL,
-        'multi_label_classification': True,
-        'n_folds': N_folds,
-        'n_features_to_select': N_feats,
-        'test_size': TEST_SIZE,
-        'feature_selection_method': FEAT_SELECT,
-        'optimized': OPTIM
-    }
-
-
-    # Load the dataset
-    DATASET_PATH = "tcga_brca_raw_19036_1053samples.pkl"
-
-    with open(DATASET_PATH, 'rb') as file:
-        dataset = pkl.load(file) 
-
-    X = dataset.drop(columns=['expert_PAM50_subtype', 'tcga_id', 'sample_id', 'cancer_type'], inplace=False)
-    y = dataset.expert_PAM50_subtype
-
-    # Split the dataset
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=TEST_SIZE, random_state=1, 
-                                                        shuffle=True, stratify=y) 
-    
-    # Data standardization | normalization
-    scaler = FunctionTransformer(log_transform)
-    X_train_scaled = scaler.fit_transform(X_train)
-    X_train_scaled = pd.DataFrame(X_train_scaled, columns=X.columns)
-    X_test_scaled = scaler.transform(X_test)
-    X_test_scaled = pd.DataFrame(X_test_scaled, columns=X.columns)
-
-    # Train and test
-    mlc = MultiLabel_BinaryRelevance(X_train=X_train_scaled,
-                               X_test=X_test_scaled,
-                               y_train=y_train, 
-                               y_test=y_test)
-    
-    predictions, best_model = mlc.train_test()
-    print(predictions)
-    y_test = pd.get_dummies(y_test)[predictions.columns]
-
-    # Total scores
-    print('\nTest accuracy: {}'.format(accuracy_score(y_test, predictions)))
-    print('Test recall: {}'.format(recall_score(y_test, predictions, average='weighted', zero_division=1)))
-    print('Test precision: {}'.format(precision_score(y_test, predictions, average='weighted', zero_division=1)))
-    print('Test f1 score: {}'.format(f1_score(y_test, predictions, average='weighted', zero_division=1)))
-
-    print('Test recall: {}'.format(recall_score(y_test, predictions, average='macro', zero_division=1)))
-    print('Test precision: {}'.format(precision_score(y_test, predictions, average='macro', zero_division=1)))
-    print('Test f1 score: {}'.format(f1_score(y_test, predictions, average='macro', zero_division=1)))
-
-    print(best_model)
-
-
-
-
-
-
 
