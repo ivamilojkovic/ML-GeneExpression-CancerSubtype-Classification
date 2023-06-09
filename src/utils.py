@@ -13,10 +13,12 @@ import seaborn as sns
 plt.rcParams.update({'font.size': 12})
 matplotlib.rcParams['xtick.labelsize'] = 12
 
-def discard_negative_correlations(dataset):
+def discard_negative_correlations(old_dataset):
 
     """ Set all negative correlation values to zero.
     """
+
+    dataset = old_dataset.copy()
 
     dataset['LumA'][dataset['LumA'] < 0] = 0
     dataset['LumB'][dataset['LumB'] < 0] = 0
@@ -26,14 +28,16 @@ def discard_negative_correlations(dataset):
 
     return dataset
 
-def m_cut_strategy_class_assignment(data, non_neg_values=False):
+def m_cut_strategy_class_assignment(orig_data, non_neg_values=False):
 
     """ Given the predicted probabilities from the classifier or correlations, 
         the M-cut strategy is performed to assign each sample one or more labels.
     """
 
     if non_neg_values:
-        data = discard_negative_correlations(data)
+        data = discard_negative_correlations(orig_data)
+    else:
+        data = orig_data
 
     assigned_labels = []
 
@@ -52,6 +56,120 @@ def m_cut_strategy_class_assignment(data, non_neg_values=False):
     return pd.DataFrame(assigned_labels, columns=data.columns)
         
 
+def plot_class_distribution_comparison(data, y_corr_labels, y_corr_labels_neg):
+
+    # Class distribution (counts) comparison
+    ax = plt.figure()
+    df_compare = pd.DataFrame({
+        'Single label assigned by PAM50 maximum correlation': data['Subtype-from Parker centroids'].value_counts(),
+        'Multiple labels M-cut strategy (non-negative correlations)': y_corr_labels.sum(axis=0),
+        'Multiple labels M-cut & 5th percentile strategy (non-negative correlations)': y_corr_labels_neg.sum(axis=0)
+        }, 
+        index=['LumA', 'LumB',	'Basal', 'Her2', 'Normal'])
+    ax = df_compare.plot(kind='bar', rot=30, title='Class distribution comparison')
+    for g in ax.patches:
+        ax.annotate(format(g.get_height(),),
+                    (g.get_x() + g.get_width() / 2., g.get_height()),
+                    ha = 'center', va = 'center',
+                    xytext = (0, 5),
+                    textcoords = 'offset points',
+                    fontsize=6)
+        
+def plot_stacked_bars(y_new, y_corr_labels, y_5perc_labels):
+
+    # Generate some random data for the bars
+    num_bars = 5
+    num_colors = 5
+    
+    class_names = ['LumA', 'LumB',	'Basal', 'Her2', 'Normal']
+    data = np.zeros(shape=(num_bars, num_colors))
+    data2 = np.zeros(shape=(num_bars, num_colors))
+
+    for i, label_y in enumerate(class_names):
+        for j, label_corr in enumerate(class_names):
+            val = y_corr_labels[label_corr][y_new==label_y].sum()
+            data[i][j] = val
+
+    for i, label_y in enumerate(class_names):
+        for j, label_corr in enumerate(class_names):
+            val = y_5perc_labels[label_corr][y_new==label_y].sum()
+            data2[i][j] = val
+            
+    # Define the colors for the bars
+    palette = sns.color_palette("deep", num_colors)
+
+    # Create a figure and axis
+    fig, ax = plt.subplots()
+
+    # Set the positions of the bars on the x-axis
+    x = np.arange(num_bars)
+
+    # Plot the stacked bars
+    # Plot the stacked bars
+    width = 0.35
+
+    # Plot the first set of stacked bars
+    bottom = np.zeros(num_bars)
+    for i in range(num_colors):
+        ax.bar(x - 0.02 - width/2, data[:, i], width, bottom=bottom, 
+               label=class_names[i], color=palette[i])
+        bottom += data[:, i]
+
+    # Plot the second set of stacked bars
+    bottom = np.zeros(num_bars)
+    for i in range(num_colors):
+        ax.bar(x + 0.02 + width/2, data2[:, i], width, bottom=bottom, 
+               label=class_names[i], color=palette[i])
+        bottom += data2[:, i]
+
+    # Customize the plot
+    ax.set_xticks(x)
+    ax.set_xticklabels(class_names)
+    ax.set_ylabel('Labels correlation values - counts')
+    ax.set_xlabel('PAM50 label')
+    ax.set_title('Labels (M-cut and 5th percentile strategy) count depending on PAM50 label')
+    ax.legend(class_names)
+
+
+def create_mcut_fifth_percentile_labels(m_cut_labels, correlations, y):
+
+    """ If a label-specific correlation is below the 5th percentile,
+        set the m-cut_label to 0 if it was 1 previously. This scenario 
+        can create samples that do not have any label assigned, compared 
+        to m-cut strategy, where at least one label need to be assigned.
+    """
+
+    # Create a copy of m_cut_labels that's going to be modified
+    m_cut_labels_2 = m_cut_labels.copy(deep=True)
+
+    for i, label in enumerate(correlations.columns):
+
+        # Find indices where label is located in y (PAM50 label with max correlation)
+        pam50_label_idx = y == label
+
+        # Compute the 5th percentile
+        label_thresh = np.percentile(
+            correlations[label][pam50_label_idx], 5)
+        
+        # Set 0 where the correlation is below the threshold
+        lower_than_thresh_idx = correlations.loc[pam50_label_idx, label] < label_thresh
+
+        # Use loc to modify values in m_cut_labels_2
+        indices = m_cut_labels_2.loc[pam50_label_idx, label].loc[lower_than_thresh_idx].index
+        m_cut_labels_2.loc[indices, label] = 0
+
+    return m_cut_labels_2
+
+def relaxed_accuracy(y_true, y_pred):
+
+    num_instances = len(y_true)
+    correct_instances = 0
+
+    for i in range(num_instances):
+        if y_pred.iloc[i, y_true[i]]==1:
+            correct_instances += 1
+
+    return correct_instances / num_instances
 
 
 def log_transform(x):

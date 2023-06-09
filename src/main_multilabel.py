@@ -1,15 +1,15 @@
 from multilabel_classification import *
-from sklearn.metrics import accuracy_score, recall_score, precision_score, f1_score, matthews_corrcoef
+from sklearn.metrics import accuracy_score, recall_score, \
+    precision_score, f1_score, hamming_loss
 from sklearn.model_selection import train_test_split
 from sklearn.feature_selection import SelectKBest, f_classif
-from sklearn.preprocessing import LabelEncoder
-import datetime
+from sklearn.preprocessing import LabelEncoder, FunctionTransformer
 import pickle
 import pandas as pd
 import os
 import matplotlib.pyplot as plt
 import matplotlib
-from utils import m_cut_strategy_class_assignment
+from utils import *
 
 # Set parameters
 plt.style.use('ggplot')
@@ -33,31 +33,34 @@ with open('dataset_multilabel.pkl', 'rb') as file:
     y_old = data.expert_PAM50_subtype
     y_new = data['Subtype-from Parker centroids']
 
-    # M-cut strategy to assign labels on whole dataset
+    # Take labels on whole dataset for PAM50
     y_corr = data[['Basal', 'Her2', 'LumA', 'LumB',	'Normal']]
-    y_corr_labels = m_cut_strategy_class_assignment(y_corr, non_neg_values=True)
-    #y_corr_labels_neg = m_cut_strategy_class_assignment(y_corr, non_neg_values=True)
-    
+    y_corr_non_neg = discard_negative_correlations(y_corr)
 
-    # Class distribution (counts) comparison
-    ax = plt.figure()
-    df_compare = pd.DataFrame({'Single label': data['Subtype-from Parker centroids'].value_counts(),
-                    'Multiple labels M-cut strategy (non-negative correlations)': y_corr_labels.sum(axis=0),
-                    #'Multiple labels M-cut strategy (negative correlations)': y_corr_labels_neg.sum(axis=0)
-                    }, 
-                    index=['LumA', 'LumB',	'Basal', 'Her2', 'Normal'])
-    ax = df_compare.plot(kind='bar', rot=30, title='Class distribution comparison')
-    for g in ax.patches:
-        ax.annotate(format(g.get_height(),),
-                    (g.get_x() + g.get_width() / 2., g.get_height()),
-                    ha = 'center', va = 'center',
-                    xytext = (0, 5),
-                    textcoords = 'offset points',
-                    fontsize=6)
+    # M-cut strategy to assign labels on whole dataset
+    y_mcut_labels = m_cut_strategy_class_assignment(y_corr, non_neg_values=True)
+    y_mcut_labels_neg = m_cut_strategy_class_assignment(y_corr, non_neg_values=False)
     
+    # Compare class distributions for original and two cases with m-cut
+    plot_class_distribution_comparison(data, y_mcut_labels, y_mcut_labels_neg)
+
+    # Compute labels from two strategies (M-cut and 5th percentile)
+    y_mcut_5perc_labels = create_mcut_fifth_percentile_labels(
+        m_cut_labels=y_mcut_labels,
+        correlations=y_corr_non_neg,
+        y=y_new
+    )
+
+    # Plot stacked bars for m-cut (non-negative correlations)
+    plot_stacked_bars(y_new, y_mcut_labels, y_mcut_5perc_labels)
+    
+    # Compare class distributions for original and two cases with m-cut
+    plot_class_distribution_comparison(data, y_mcut_labels, y_mcut_5perc_labels)
     X_train, X_test, y_train, y_test, \
-        y_train_corr_labels, y_test_corr_labels = train_test_split(X, y_new, y_corr_labels, 
-                                                   test_size=0.3, random_state=1)
+        y_train_corr_labels, y_test_corr_labels, \
+            y_train_old, y_test_old = \
+                train_test_split(X, y_new, y_mcut_labels, y_old, 
+                                test_size=0.3, random_state=1)
 
     # Data standardization | normalization
     X_train = X_train.divide(X_train.sum(axis=1), axis=0) * 1e6
@@ -72,11 +75,10 @@ with open('dataset_multilabel.pkl', 'rb') as file:
     LB = LabelEncoder() 
     y_train = pd.Series(LB.fit_transform(y_train), index=y_train.index)
     y_test = LB.transform(y_test)
-    # y_test = pd.get_dummies(y_test)
-    # y_train = pd.get_dummies(y_train)
+    y_test_old = LB.transform(y_test_old)
 
     # Feature selection
-    best_feat_model = SelectKBest(score_func=f_classif, k=500) # k needs to be defined
+    best_feat_model = SelectKBest(score_func=f_classif, k=500) 
     best_feat_model.fit(X_train_scaled, y_train)
     df_scores = pd.DataFrame(best_feat_model.scores_)
     df_feats = pd.DataFrame(X.columns)
@@ -94,7 +96,7 @@ with open(os.path.join('models', 'bestmodel_run_08-05-2023_10:32:03.pkl'), 'rb')
     model = pickle.load(file)
 
 # Train and test
-ml_approach = MultiLabel_BinaryRelevance(X_train=X_train_scaled_selected,
+ml_approach = MultiLabel_PowerSet(X_train=X_train_scaled_selected,
                              X_test=X_test_scaled_selected,
                              y_train=y_train_corr_labels, 
                              y_test=y_test_corr_labels)
@@ -102,23 +104,41 @@ ml_approach = MultiLabel_BinaryRelevance(X_train=X_train_scaled_selected,
 predictions = ml_approach.train_test(model)
 print(predictions)
 
-# If M-cut strategy
-y_test = y_test_corr_labels
-
 # Total scores
-print('\nTest accuracy: {}'.format(accuracy_score(y_test, predictions)))
+print('\nTest accuracy: {}'.format(accuracy_score(y_test_corr_labels, predictions)))
+print('\nTest Hamming loss: {}'.format(hamming_loss(y_test_corr_labels, predictions)))
+print('\nTest relaxed accuracy (PAM50): {}'.format(relaxed_accuracy(y_test, predictions)))
+print('\nTest relaxed accuracy (original): {}'.format(relaxed_accuracy(y_test_old, predictions)))
 
-print('Test precision (weighted): {}'.format(precision_score(y_test, predictions, average='weighted', zero_division=1)))
-print('Test recall (weighted): {}'.format(recall_score(y_test, predictions, average='weighted', zero_division=1)))
-print('Test f1 score (weighted): {}\n'.format(f1_score(y_test, predictions, average='weighted', zero_division=1)))
+print('Test precision (weighted): {}'.\
+      format(precision_score(y_test_corr_labels, predictions, 
+                             average='weighted', zero_division=1)))
+print('Test recall (weighted): {}'.\
+      format(recall_score(y_test_corr_labels, predictions, 
+                          average='weighted', zero_division=1)))
+print('Test f1 score (weighted): {}\n'.\
+      format(f1_score(y_test_corr_labels, predictions, 
+                      average='weighted', zero_division=1)))
 
-print('Test precision (macro): {}'.format(precision_score(y_test, predictions, average='macro', zero_division=1)))
-print('Test recall (macro): {}'.format(recall_score(y_test, predictions, average='macro', zero_division=1)))
-print('Test f1 score (macro): {}\n'.format(f1_score(y_test, predictions, average='macro', zero_division=1)))
+print('Test precision (macro): {}'.\
+      format(precision_score(y_test_corr_labels, predictions, 
+                             average='macro', zero_division=1)))
+print('Test recall (macro): {}'.\
+      format(recall_score(y_test_corr_labels, predictions, 
+                          average='macro', zero_division=1)))
+print('Test f1 score (macro): {}\n'.\
+      format(f1_score(y_test_corr_labels, predictions, 
+                      average='macro', zero_division=1)))
 
-print('Test precision (micro): {}'.format(precision_score(y_test, predictions, average='micro', zero_division=1)))
-print('Test recall (micro): {}'.format(recall_score(y_test, predictions, average='micro', zero_division=1)))
-print('Test f1 score (micro): {}\n'.format(f1_score(y_test, predictions, average='micro', zero_division=1)))
+print('Test precision (micro): {}'.\
+      format(precision_score(y_test_corr_labels, predictions, 
+                             average='micro', zero_division=1)))
+print('Test recall (micro): {}'.\
+      format(recall_score(y_test_corr_labels, predictions, 
+                          average='micro', zero_division=1)))
+print('Test f1 score (micro): {}\n'.\
+      format(f1_score(y_test_corr_labels, predictions, 
+                      average='micro', zero_division=1)))
 
 
 
