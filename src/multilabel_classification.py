@@ -1,8 +1,9 @@
-from skmultilearn.problem_transform import LabelPowerset, BinaryRelevance
-from skmultilearn.adapt import MLkNN
+from skmultilearn.problem_transform import LabelPowerset, BinaryRelevance, ClassifierChain
+from skmultilearn.adapt import MLkNN, MLTSVM, MLARAM
+from skmultilearn.ensemble import RakelD, RakelO
 from sklearn.multiclass import OneVsOneClassifier, OneVsRestClassifier
-from sklearn.multioutput import ClassifierChain
 from sklearn.pipeline import Pipeline
+from sklearn.multioutput import ClassifierChain as CC
 from sklearn.metrics import accuracy_score, recall_score, precision_score, f1_score, \
     average_precision_score, label_ranking_average_precision_score, label_ranking_loss
 from tqdm import tqdm
@@ -17,11 +18,7 @@ class MultiLabelClassification():
         self.X_train = X_train
         self.X_test = X_test
 
-        #self.labels = np.unique(y_train)
         self.labels = y_train.columns
-
-#        self.y_train = pd.get_dummies(y_train)
-#        self.y_test = pd.get_dummies(y_test)
         self.y_train = y_train
         self.y_test = y_test
 
@@ -43,7 +40,6 @@ class MultiLabel_OnevsRest(MultiLabelClassification):
         
         class_pipe = Pipeline([('clf', OneVsRestClassifier(model))])
         for label in self.labels:
-            print('Progress for predicting label {}...'.format(label))
 
             class_pipe.fit(self.X_train, self.y_train[label])
             pred = class_pipe.predict(self.X_test)
@@ -106,7 +102,6 @@ class MultiLabel_BinaryRelevance(MultiLabelClassification):
         clf = BinaryRelevance(base)
 
         for label in self.labels:
-            print('Progress for predicting label {}...'.format(label))
 
             clf.fit(self.X_train, self.y_train[label].values)
             pred = clf.predict(self.X_test).toarray()
@@ -114,11 +109,6 @@ class MultiLabel_BinaryRelevance(MultiLabelClassification):
 
             preds.append(pred)
             prob_preds.append(pred_prob)
-            
-            print('Test accuracy is {}\n'.format(accuracy_score(self.y_test[label].values, pred)))
-            print('Test recall is {}\n'.format(recall_score(self.y_test[label], pred)))
-            print('Test precision is {}\n'.format(precision_score(self.y_test[label], pred)))
-            print('Test f1 score is {}\n'.format(f1_score(self.y_test[label], pred)))
 
         # Put preds and prob_preds into suitable shape
         preds = pd.DataFrame(np.transpose(preds)[0], columns=self.labels)
@@ -135,7 +125,7 @@ class MultiLabel_BinaryRelevance(MultiLabelClassification):
         return preds
     
     
-class MultiLabel_Chains(MultiLabelClassification):
+class MultiLabel_EnsembleChains(MultiLabelClassification):
 
     def __init__(self, X_train, y_train, X_test, y_test):
         super().__init__(X_train, y_train, X_test, y_test)
@@ -150,10 +140,9 @@ class MultiLabel_Chains(MultiLabelClassification):
             base = xgb.XGBClassifier(**xgb_param)
 
         # Randomly select the order for N times 
-        chains = [ClassifierChain(
-            base, 
-            order="random", 
-            random_state=i) for i in range(N)]
+        chains = [CC(base, 
+                    order="random", 
+                    random_state=i, ) for i in range(N)]
         
         # Train each chain
         for chain in tqdm(chains, desc='Chain: '):
@@ -175,6 +164,72 @@ class MultiLabel_Chains(MultiLabelClassification):
         print('Average precision: ', avg_prec)
 
         return pd.DataFrame(y_pred, columns=self.y_test.columns)
+    
+class MultiLabel_EnsembleRakel(MultiLabelClassification):
+
+    def __init__(self, X_train, y_train, X_test, y_test):
+        super().__init__(X_train, y_train, X_test, y_test)
+
+    def train_test(self, model, type='distinct'):
+
+        # Check if model is XGBoost classifier
+        if isinstance(model, xgb.XGBClassifier):
+            xgb_param = model.get_xgb_params()
+            extra = {'objective': 'binary:logistic'}
+            xgb_param.update(extra)
+            base = xgb.XGBClassifier(**xgb_param)
+
+        if type=='distinct':
+            clf = RakelD(base_classifier=base, labelset_size=3)
+        elif type=='overlapping':
+            clf = RakelO(base_classifier=base, labelset_size=3, model_count=2*5)
+        clf.fit(self.X_train, self.y_train)
+
+        y_pred = clf.predict(self.X_test).toarray()
+        y_pred_prob = clf.predict_proba(self.X_test).toarray()
+
+        # Compute ranking average precision
+        rank_avg_prec = label_ranking_average_precision_score(self.y_test,y_pred_prob)
+        print('Ranking average precision: ', rank_avg_prec)
+
+        # Compute average precision score
+        avg_prec = average_precision_score(self.y_test, y_pred)
+        print('Average precision: ', avg_prec)
+
+        return pd.DataFrame(y_pred, columns=self.y_test.columns)
+    
+
+class MultiLabel_Chains(MultiLabelClassification):
+
+    def __init__(self, X_train, y_train, X_test, y_test):
+        super().__init__(X_train, y_train, X_test, y_test)
+
+    def train_test(self, model):
+
+        # Check if model is XGBoost classifier
+        if isinstance(model, xgb.XGBClassifier):
+            xgb_param = model.get_xgb_params()
+            extra = {'objective': 'binary:logistic'}
+            xgb_param.update(extra)
+            base = xgb.XGBClassifier(**xgb_param)
+
+        # Create classifier chain 
+        chain = ClassifierChain(classifier=base)
+        chain.fit(self.X_train, self.y_train)
+
+        # Compute probability predictions and predictions
+        y_pred_prob = chain.predict_proba(self.X_test).toarray()
+        y_pred = chain.predict(self.X_test).toarray()
+
+        # Compute ranking average precision
+        rank_avg_prec = label_ranking_average_precision_score(self.y_test, y_pred_prob)
+        print('Ranking average precision: ', rank_avg_prec)
+
+        # Compute average precision score
+        avg_prec = average_precision_score(self.y_test, y_pred)
+        print('Average precision: ', avg_prec)
+
+        return pd.DataFrame(y_pred, columns=self.y_test.columns)
 
 
 class MultiLabel_Adapted(MultiLabelClassification):
@@ -182,27 +237,46 @@ class MultiLabel_Adapted(MultiLabelClassification):
     def __init__(self, X_train, y_train, X_test, y_test):
         super().__init__(X_train, y_train, X_test, y_test)
 
-    def train_test(self, model=None):
+    def train_test(self, type: str='MLkNN', model=None):
 
-        x_train = lil_matrix(self.X_train.values).toarray()
-        y_train = lil_matrix(self.y_train.values).toarray()
+        if type == 'MLkNN':
 
-        classifier = MLkNN(k=20)
+            classifier = MLkNN(k=20)
+
+            x_train = lil_matrix(self.X_train.values).toarray()
+            y_train = lil_matrix(self.y_train.values).toarray()
+
+        elif type == 'MLTSVM':
+            classifier = MLTSVM(c_k=0.1, threshold=0.5)
+
+            x_train = lil_matrix(self.X_train.values)
+            y_train = lil_matrix(self.y_train.values)
+
+        elif type == 'MLARAM':
+
+            classifier = MLARAM(threshold=0.05, vigilance=0.9)
+            x_train = lil_matrix(self.X_train.values).toarray()
+            y_train = lil_matrix(self.y_train.values).toarray()
+        
         classifier.fit(x_train, y_train)
 
         # Compute predictions and their probabilities
         pred = classifier.predict(self.X_test.values)
         pred_prob = classifier.predict_proba(self.X_test.values)
 
+        if type != 'MLARAM':
+            pred_prob = pred_prob.todense()
+            pred = pred.todense()
+        
         # Compute ranking average precision
-        rank_avg_prec = label_ranking_average_precision_score(self.y_test, pred_prob.todense())
+        rank_avg_prec = label_ranking_average_precision_score(self.y_test, pred_prob)
         print('Ranking average precision: ', rank_avg_prec)
 
         # Compute average precision score
-        avg_prec = average_precision_score(self.y_test, pred.todense())
+        avg_prec = average_precision_score(self.y_test, pred)
         print('Average precision: ', avg_prec)
 
-        return pd.DataFrame(pred.todense(), columns=self.y_test.columns)
+        return pd.DataFrame(pred, columns=self.y_test.columns)
 
 
 class MultiLabel_PowerSet(MultiLabelClassification):

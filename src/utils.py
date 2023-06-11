@@ -3,7 +3,7 @@ import matplotlib
 from sklearn.model_selection import cross_validate
 import numpy as np
 from sklearn.metrics import accuracy_score, f1_score, precision_score, roc_auc_score
-from sklearn.metrics import recall_score, matthews_corrcoef
+from sklearn.metrics import recall_score, matthews_corrcoef, hamming_loss
 import torch
 from deeplearn_models import *
 import pandas as pd
@@ -166,8 +166,12 @@ def relaxed_accuracy(y_true, y_pred):
     correct_instances = 0
 
     for i in range(num_instances):
-        if y_pred.iloc[i, y_true[i]]==1:
-            correct_instances += 1
+        if y_true.shape[1] == 5:
+            if any(y_pred.iloc[i][y_true.iloc[i,:]==1]==1):
+                correct_instances += 1
+        else:
+            if y_pred.iloc[i, y_true[i]]==1:
+                correct_instances += 1
 
     return correct_instances / num_instances
 
@@ -403,3 +407,41 @@ def plot_pca(df_pca, labels_assigned, new_samples, dim=2):
 
     labels = ['Basal', 'Her2', 'Her2 - new','LumA', 'LumB',  'Normal', 'Normal - new']
     plt.legend(labels, loc="upper left", ncol=len(labels), fontsize=6)
+
+
+
+def print_all_scores(y_test, predictions):
+
+    # Total scores
+    print('\nTest accuracy: {}'.format(accuracy_score(y_test, predictions)))
+    print('Test Hamming loss: {}\n'.format(hamming_loss(y_test, predictions)))
+
+    print('Test precision (weighted): {}'.\
+        format(precision_score(y_test, predictions, 
+                                average='weighted', zero_division=1)))
+    print('Test recall (weighted): {}'.\
+        format(recall_score(y_test, predictions, 
+                            average='weighted', zero_division=1)))
+    print('Test f1 score (weighted): {}\n'.\
+        format(f1_score(y_test, predictions, 
+                        average='weighted', zero_division=1)))
+
+    print('Test precision (macro): {}'.\
+        format(precision_score(y_test, predictions, 
+                                average='macro', zero_division=1)))
+    print('Test recall (macro): {}'.\
+        format(recall_score(y_test, predictions, 
+                            average='macro', zero_division=1)))
+    print('Test f1 score (macro): {}\n'.\
+        format(f1_score(y_test, predictions, 
+                        average='macro', zero_division=1)))
+
+    print('Test precision (micro): {}'.\
+        format(precision_score(y_test, predictions, 
+                                average='micro', zero_division=1)))
+    print('Test recall (micro): {}'.\
+        format(recall_score(y_test, predictions, 
+                            average='micro', zero_division=1)))
+    print('Test f1 score (micro): {}\n'.\
+        format(f1_score(y_test, predictions, 
+                        average='micro', zero_division=1)))
