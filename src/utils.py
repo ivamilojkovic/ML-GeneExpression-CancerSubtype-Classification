@@ -10,6 +10,7 @@ import pandas as pd
 from sklearn.linear_model import LassoCV
 import seaborn as sns
 
+
 plt.rcParams.update({'font.size': 12})
 matplotlib.rcParams['xtick.labelsize'] = 12
 
@@ -74,6 +75,67 @@ def plot_class_distribution_comparison(data, y_corr_labels, y_corr_labels_neg):
                     xytext = (0, 5),
                     textcoords = 'offset points',
                     fontsize=6)
+
+
+def count_number_of_labels(predictions):
+    cnts = []
+    for i in range(predictions.shape[1]+1):
+        cnts.append(sum(predictions.sum(axis=1)==i))
+    return cnts
+
+def plot_bar_counts_of_label_predictions(predictions_orig, 
+                                         predictions_pam50, 
+                                         predictions_mcut,
+                                         predictions_5perc,
+                                         predictions_10perc,
+                                         predictions_25perc):
+
+    # Barplots for number of labels predicted
+    ax = plt.figure()
+    df_lr = pd.DataFrame({'Orignial (one-hot encoded)': count_number_of_labels(predictions_orig),
+                    'PAM50 (one-hot encoded)': count_number_of_labels(predictions_pam50),
+                    'M-cut': count_number_of_labels(predictions_mcut), 
+                    'M-cut & 5th percentile filtering': count_number_of_labels(predictions_5perc),
+                    'M-cut & 10th percentile filtering': count_number_of_labels(predictions_10perc),
+                    'M-cut & 25th percentile filtering': count_number_of_labels(predictions_25perc)
+                    }, 
+                    index=['None', 'One', 'Two', 'Three', 'Four', 'All'])
+    ax = df_lr.plot(kind='bar', rot=0, width = 0.9)
+    for g in ax.patches:
+        ax.annotate(format(g.get_height(), '.0f'),
+                    (g.get_x() + g.get_width() / 2, g.get_height()),
+                    ha = 'center', va = 'center',
+                    xytext = (0, 5),
+                    textcoords = 'offset points',
+                    fontsize=4)
+    plt.legend(loc='upper right')
+    return ax
+
+def plot_bar_counts_of_label(
+    y_mcut,
+    y_5perc,
+    y_10perc,
+    y_25perc):
+
+    # Barplots for number of labels predicted
+    ax = plt.figure()
+    df_lr = pd.DataFrame({
+                    'M-cut': count_number_of_labels(y_mcut), 
+                    'M-cut & 5th percentile filtering': count_number_of_labels(y_5perc),
+                    'M-cut & 10th percentile filtering': count_number_of_labels(y_10perc),
+                    'M-cut & 25th percentile filtering': count_number_of_labels(y_25perc)
+                    }, 
+                    index=['None', 'One', 'Two', 'Three', 'Four', 'All'])
+    ax = df_lr.plot(kind='bar', rot=0, width = 0.9)
+    for g in ax.patches:
+        ax.annotate(format(g.get_height(), '.0f'),
+                    (g.get_x() + g.get_width() / 2, g.get_height()),
+                    ha = 'center', va = 'center',
+                    xytext = (0, 5),
+                    textcoords = 'offset points',
+                    fontsize=4)
+    plt.legend(loc='upper right')
+    return ax
         
 def plot_stacked_bars(y_new, y_corr_labels, y_5perc_labels):
 
@@ -127,11 +189,75 @@ def plot_stacked_bars(y_new, y_corr_labels, y_5perc_labels):
     ax.set_xticklabels(class_names)
     ax.set_ylabel('Labels correlation values - counts')
     ax.set_xlabel('PAM50 label')
-    ax.set_title('Labels (M-cut and 5th percentile strategy) count depending on PAM50 label')
     ax.legend(class_names)
 
+    return ax
 
-def create_mcut_fifth_percentile_labels(m_cut_labels, correlations, y):
+def plot_stacked_bars_primary_secondary_label_assigned(y_mcut_labels, y_pam50):
+
+    # Generate some random data for the bars
+    num_bars = 5
+    num_colors = 2
+    
+    class_names = ['LumA', 'LumB',	'Basal', 'Her2', 'Normal']
+
+    primary, secondary = {}, {}
+    for i, label_pam50 in enumerate(y_pam50):
+
+        if y_mcut_labels.iloc[i, :][label_pam50] == 1:
+            if label_pam50 not in primary:
+                primary[label_pam50] = 0
+            primary[label_pam50] += 1
+
+        if y_mcut_labels.iloc[i, :].sum() > 1: # there are other labels assigned 
+            sec_labels = (y_mcut_labels.columns[y_mcut_labels.iloc[i, :] == 1]).tolist() 
+            for sec_label in sec_labels:
+                if sec_labels != label_pam50:
+                    if sec_label not in secondary:
+                        secondary[sec_label] = 0
+                    secondary[sec_label] += 1
+
+    # Concatenate Dictionary string values
+    res = {key: [primary[key]] + [secondary[key]] for key in primary.keys()}
+    result = res.values()
+    class_names = list(res.keys())
+ 
+    # Convert object to a list
+    data = list(result)
+    
+    # Convert list to an array
+    data = np.array(data).transpose()
+            
+    # Define the colors for the bars
+    palette = sns.color_palette("deep", num_colors)
+
+    # Create a figure and axis
+    fig, ax = plt.subplots()
+
+    # Set the positions of the bars on the x-axis
+    bars = np.arange(num_bars)
+
+    # Plot the stacked bars
+    width = 0.5
+
+    # Plot the first set of stacked bars
+    bottom = np.zeros(num_bars)
+    for i in range(num_colors):
+        ax.bar(bars, data[i, :], width, bottom=bottom, 
+               label=class_names[i], color=palette[i])
+        bottom += data[i, :]
+
+    # Customize the plot
+    ax.set_xticks(bars)
+    ax.set_xticklabels(class_names)
+    ax.set_ylabel('Label counts')
+    ax.set_xlabel('labels')
+    ax.legend(['Primary label', 'Secondary label'])
+
+    return ax
+
+
+def create_mcut_nth_percentile_labels(m_cut_labels, correlations, y, N: int = 5):
 
     """ If a label-specific correlation is below the 5th percentile,
         set the m-cut_label to 0 if it was 1 previously. This scenario 
@@ -149,7 +275,7 @@ def create_mcut_fifth_percentile_labels(m_cut_labels, correlations, y):
 
         # Compute the 5th percentile
         label_thresh = np.percentile(
-            correlations[label][pam50_label_idx], 5)
+            correlations[label][pam50_label_idx], N)
         
         # Set 0 where the correlation is below the threshold
         lower_than_thresh_idx = correlations.loc[pam50_label_idx, label] < label_thresh

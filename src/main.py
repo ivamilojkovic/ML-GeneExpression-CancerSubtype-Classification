@@ -333,7 +333,7 @@ def main(cfg: ProjectConfig):
     #                'SVC', 'Random Forest', 'XGBoost', 
     #                'LightGBM', 'AdaBoost']
 
-    MODEL_TYPES = ['XGBoost']
+    MODEL_TYPES = ['SVC']
 
     for MODEL_TYPE in MODEL_TYPES:
 

@@ -11,6 +11,7 @@ import pandas as pd
 import numpy as np
 from scipy.sparse import csr_matrix, lil_matrix
 import xgboost as xgb
+from sklearn.svm import SVC
 
 class MultiLabelClassification():
     def __init__(self, X_train, y_train, X_test, y_test):
@@ -98,6 +99,11 @@ class MultiLabel_BinaryRelevance(MultiLabelClassification):
             extra = {'objective': 'binary:logistic'}
             xgb_param.update(extra)
             base = xgb.XGBClassifier(**xgb_param)
+        elif isinstance(model, SVC):
+            model.probability = True
+            base = model
+        else:
+            base = model
 
         clf = BinaryRelevance(base)
 
@@ -138,6 +144,11 @@ class MultiLabel_EnsembleChains(MultiLabelClassification):
             extra = {'objective': 'binary:logistic'}
             xgb_param.update(extra)
             base = xgb.XGBClassifier(**xgb_param)
+        elif isinstance(model, SVC):
+            model.probability = True
+            base = model
+        else:
+            base = model
 
         # Randomly select the order for N times 
         chains = [CC(base, 
@@ -178,6 +189,11 @@ class MultiLabel_EnsembleRakel(MultiLabelClassification):
             extra = {'objective': 'binary:logistic'}
             xgb_param.update(extra)
             base = xgb.XGBClassifier(**xgb_param)
+        elif isinstance(model, SVC):
+            model.probability = True
+            base = model
+        else:
+            base = model
 
         if type=='distinct':
             clf = RakelD(base_classifier=base, labelset_size=3)
@@ -212,6 +228,11 @@ class MultiLabel_Chains(MultiLabelClassification):
             extra = {'objective': 'binary:logistic'}
             xgb_param.update(extra)
             base = xgb.XGBClassifier(**xgb_param)
+        elif isinstance(model, SVC):
+            model.probability = True
+            base = model
+        else:
+            base = model
 
         # Create classifier chain 
         chain = ClassifierChain(classifier=base)
@@ -292,6 +313,8 @@ class MultiLabel_PowerSet(MultiLabelClassification):
             extra = {'objective': 'binary:logistic'}
             xgb_param.update(extra)
             model = xgb.XGBClassifier(**xgb_param)
+        elif isinstance(model, SVC):
+            model.probability = True
 
         # create MultiOutputClassifier instance with XGBoost model inside
         multilabel_model = LabelPowerset(model)

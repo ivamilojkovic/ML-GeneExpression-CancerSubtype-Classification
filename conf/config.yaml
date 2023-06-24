@@ -10,7 +10,7 @@ train:
   test_size: 0.3
   random_state: 4
   random_state_split: 1
-  optim: False
+  optim: True
   grid_scoring: 'accuracy'
   downsample_test: False
   num_folds: 10
