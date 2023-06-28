@@ -218,7 +218,7 @@ def plot_stacked_bars_primary_secondary_label_assigned(y_mcut_labels, y_pam50):
                     secondary[sec_label] += 1
 
     # Concatenate Dictionary string values
-    res = {key: [primary[key]] + [secondary[key]] for key in primary.keys()}
+    res = {key: [primary[key]] + [secondary[key]] for key in class_names}
     result = res.values()
     class_names = list(res.keys())
  
@@ -247,6 +247,19 @@ def plot_stacked_bars_primary_secondary_label_assigned(y_mcut_labels, y_pam50):
                label=class_names[i], color=palette[i])
         bottom += data[i, :]
 
+    # Add height labels on top of each part of the bar
+    for i in range(num_colors):
+        for j in range(num_bars):
+            label_x = bars[j]
+            if i==0:
+                label_y = data[i, j] / 2
+            else:
+                label_y = bottom[j] - data[i, j] / 2
+
+            ax.text(label_x, label_y, str(data[i, j]), ha='center', va='center')
+
+
+
     # Customize the plot
     ax.set_xticks(bars)
     ax.set_xticklabels(class_names)
@@ -257,7 +270,12 @@ def plot_stacked_bars_primary_secondary_label_assigned(y_mcut_labels, y_pam50):
     return ax
 
 
-def create_mcut_nth_percentile_labels(m_cut_labels, correlations, y, N: int = 5):
+def create_mcut_nth_percentile_labels(
+        m_cut_labels, 
+        correlations, 
+        y, 
+        keep_primary: bool = False, 
+        N: int = 5):
 
     """ If a label-specific correlation is below the 5th percentile,
         set the m-cut_label to 0 if it was 1 previously. This scenario 
@@ -278,29 +296,21 @@ def create_mcut_nth_percentile_labels(m_cut_labels, correlations, y, N: int = 5)
             correlations[label][pam50_label_idx], N)
         
         # Set 0 where the correlation is below the threshold
-        lower_than_thresh_idx = correlations.loc[pam50_label_idx, label] < label_thresh
+        lower_than_thresh = (correlations.loc[pam50_label_idx, label] < label_thresh)
+        lower_than_thresh_idx = lower_than_thresh[lower_than_thresh].index
 
-        # Use loc to modify values in m_cut_labels_2
-        indices = m_cut_labels_2.loc[pam50_label_idx, label].loc[lower_than_thresh_idx].index
+        # Keep the primary labels (if said) where the primary label is the only one that was assigned to a sample
+        if keep_primary:
+            more_than_one_assigned = m_cut_labels.iloc[lower_than_thresh_idx, :].sum(axis=1)>1
+            more_than_one_assigned_idx = more_than_one_assigned[more_than_one_assigned].index
+            indices = more_than_one_assigned_idx
+        else:
+            indices = lower_than_thresh_idx
+
+        # Set zeros where the percentile is below and (if selected) primary label is kept
         m_cut_labels_2.loc[indices, label] = 0
 
     return m_cut_labels_2
-
-def relaxed_accuracy(y_true, y_pred):
-
-    num_instances = len(y_true)
-    correct_instances = 0
-
-    for i in range(num_instances):
-        if y_true.shape[1] == 5:
-            if any(y_pred.iloc[i][y_true.iloc[i,:]==1]==1):
-                correct_instances += 1
-        else:
-            if y_pred.iloc[i, y_true[i]]==1:
-                correct_instances += 1
-
-    return correct_instances / num_instances
-
 
 def log_transform(x):
     return np.log2(x + 0.1)
@@ -534,40 +544,3 @@ def plot_pca(df_pca, labels_assigned, new_samples, dim=2):
     labels = ['Basal', 'Her2', 'Her2 - new','LumA', 'LumB',  'Normal', 'Normal - new']
     plt.legend(labels, loc="upper left", ncol=len(labels), fontsize=6)
 
-
-
-def print_all_scores(y_test, predictions):
-
-    # Total scores
-    print('\nTest accuracy: {}'.format(accuracy_score(y_test, predictions)))
-    print('Test Hamming loss: {}\n'.format(hamming_loss(y_test, predictions)))
-
-    print('Test precision (weighted): {}'.\
-        format(precision_score(y_test, predictions, 
-                                average='weighted', zero_division=1)))
-    print('Test recall (weighted): {}'.\
-        format(recall_score(y_test, predictions, 
-                            average='weighted', zero_division=1)))
-    print('Test f1 score (weighted): {}\n'.\
-        format(f1_score(y_test, predictions, 
-                        average='weighted', zero_division=1)))
-
-    print('Test precision (macro): {}'.\
-        format(precision_score(y_test, predictions, 
-                                average='macro', zero_division=1)))
-    print('Test recall (macro): {}'.\
-        format(recall_score(y_test, predictions, 
-                            average='macro', zero_division=1)))
-    print('Test f1 score (macro): {}\n'.\
-        format(f1_score(y_test, predictions, 
-                        average='macro', zero_division=1)))
-
-    print('Test precision (micro): {}'.\
-        format(precision_score(y_test, predictions, 
-                                average='micro', zero_division=1)))
-    print('Test recall (micro): {}'.\
-        format(recall_score(y_test, predictions, 
-                            average='micro', zero_division=1)))
-    print('Test f1 score (micro): {}\n'.\
-        format(f1_score(y_test, predictions, 
-                        average='micro', zero_division=1)))

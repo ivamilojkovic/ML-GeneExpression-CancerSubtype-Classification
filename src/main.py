@@ -10,6 +10,7 @@ from sklearn.svm import SVC
 from sklearn.feature_selection import SelectFromModel, SelectKBest, RFE, f_classif, chi2
 #from mlxtend.feature_selection import SequentialFeatureSelector
 import os, pickle, datetime, time
+from sklearn.feature_selection import RFECV
 
 import pickle as pkl
 from data_preprocessing import ClassBalance, remove_extreme
@@ -236,20 +237,28 @@ def main(cfg: ProjectConfig):
         selected_feat = featureScores.sort_values(by='Score')[-cfg.train.num_feat:]['Feature']
     
     elif cfg.train.type_feat_selection == 'hybrid':
-        best_feat_model = SelectKBest(score_func=f_classif, k=cfg.train.num_feat) # k needs to be defined
-        best_feat_model.fit(X_train_scaled, y_train)
-        mask = best_feat_model.get_support()
-        selected_feat = X.columns[mask]
-        X_selected = X_train_scaled[selected_feat]
+        if not os.path.exists(os.path.join(cfg.paths.data, 'hybrid_features_800.pkl')):
 
-        # Now apply backward feature elimination
-        model = DecisionTreeClassifier(criterion='log_loss', random_state=42)
-        selector = SequentialFeatureSelector(model, k_features=10, 
-                                            forward=False, verbose=2,
-                                            floating=False, cv=3, 
-                                            scoring='f1_weighted', n_jobs=-1)
-        selector.fit(X_selected, y_train)
-        selected_feat = list(selector.k_feature_names_)
+            # Apply filtering method 
+            filter_model = SelectKBest(score_func=f_classif, k=cfg.train.num_feat) # k needs to be defined
+            filter_model.fit(X_train_scaled, y_train)
+            mask = filter_model.get_support()
+            selected_feat = X.columns[mask]
+            X_selected = X_train_scaled[selected_feat]
+
+            # Now apply backward feature elimination
+            model = LogisticRegression(penalty='l2')
+            selector = RFECV(estimator=model, scoring='accuracy', step=1, cv=3, verbose=3, n_jobs=1)
+            selector.fit(X_selected, y_train)
+            print('Number of fetures selected: ', selector.n_features_)
+            selected_feat = X_selected.columns[selector.get_support()]
+            experiment_params['n_features_selected'] = selector.n_features_
+
+            with open(os.path.join(cfg.paths.data, 'hybrid_features_800.pkl'), 'wb') as file:
+                pickle.dump(selected_feat, file)
+        
+        with open(os.path.join(cfg.paths.data, 'hybrid_features_800.pkl'), 'rb') as file:
+            selected_feat = pickle.load(file)
 
     elif cfg.train.type_feat_selection == 'filter':
         with open('high_corr_feat.pkl', 'rb') as file:
@@ -333,7 +342,8 @@ def main(cfg: ProjectConfig):
     #                'SVC', 'Random Forest', 'XGBoost', 
     #                'LightGBM', 'AdaBoost']
 
-    MODEL_TYPES = ['SVC']
+    MODEL_TYPES = ['SVC', 'Random Forest', 'XGBoost', 
+                   'LightGBM', 'AdaBoost']
 
     for MODEL_TYPE in MODEL_TYPES:
 
@@ -504,7 +514,6 @@ def main(cfg: ProjectConfig):
         
         # --------------- Compute predictions ------------------
         pred_train = model.predict(X_train_scaled_selected.values)
-        pred_prob = model.predict_proba(X_train_scaled_selected.values)
         if cfg.train.downsample_test:
             prec_s, rec_s, f1_s = [], [], []
             for i in range(N_iter):
@@ -542,10 +551,6 @@ def main(cfg: ProjectConfig):
 
         else:
             pred = model.predict(X_test_scaled_selected.values)
-            prob_pred = model.predict_proba(X_test_scaled_selected.values)
-
-            # ---------------- M-cut strategy ----------------------
-            m_cut_labels = m_cut_strategy_class_assignment(prob_pred, non_neg_values=True)
         
             # ---------------- Compute metrics ---------------------
             test_metrics = cmp_metrics(pred, y_test)

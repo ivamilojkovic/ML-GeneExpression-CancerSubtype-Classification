@@ -12,6 +12,10 @@ import numpy as np
 from scipy.sparse import csr_matrix, lil_matrix
 import xgboost as xgb
 from sklearn.svm import SVC
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import GridSearchCV
+import itertools
+from skmultilearn.ensemble import LabelSpacePartitioningClassifier
 
 class MultiLabelClassification():
     def __init__(self, X_train, y_train, X_test, y_test):
@@ -220,7 +224,7 @@ class MultiLabel_Chains(MultiLabelClassification):
     def __init__(self, X_train, y_train, X_test, y_test):
         super().__init__(X_train, y_train, X_test, y_test)
 
-    def train_test(self, model):
+    def train_test(self, model, optimize: bool = False, optimize_model: bool = False):
 
         # Check if model is XGBoost classifier
         if isinstance(model, xgb.XGBClassifier):
@@ -235,8 +239,41 @@ class MultiLabel_Chains(MultiLabelClassification):
             base = model
 
         # Create classifier chain 
-        chain = ClassifierChain(classifier=base)
-        chain.fit(self.X_train, self.y_train)
+        chain = ClassifierChain(classifier=base, order=[0, 1, 2, 3, 4])
+
+        if optimize:
+            # Define the labels
+            labels = self.y_train.columns
+
+            # Generate all possible permutations of label orders
+            all_orders = list(itertools.permutations([0, 1, 2, 3, 4]))
+            all_orders = [list(order) for order in all_orders]
+
+            # Define the parameter grid for hyperparameter tuning
+            param_grid = {
+                'order': all_orders # Order in which labels are chained
+                }
+            
+            if isinstance(model, LogisticRegression):
+                estim_param_grid = {
+                    'classifier__estimator': [base],
+                    'classifier__estimator__C': [0.1, 1, 10]
+                }
+            
+            if optimize_model:
+                param_grid.update(estim_param_grid)
+            
+            # Create the grid search object
+            grid_search = GridSearchCV(chain, param_grid=param_grid, scoring='f1_weighted', verbose=3)
+
+            # Fit the grid search to the data
+            grid_search.fit(self.X_train, self.y_train)
+
+            # Get best model
+            chain = grid_search.best_estimator_
+
+        else:
+            chain.fit(self.X_train, self.y_train)
 
         # Compute probability predictions and predictions
         y_pred_prob = chain.predict_proba(self.X_test).toarray()
@@ -250,7 +287,7 @@ class MultiLabel_Chains(MultiLabelClassification):
         avg_prec = average_precision_score(self.y_test, y_pred)
         print('Average precision: ', avg_prec)
 
-        return pd.DataFrame(y_pred, columns=self.y_test.columns)
+        return pd.DataFrame(y_pred, columns=self.y_test.columns, dtype='int')
 
 
 class MultiLabel_Adapted(MultiLabelClassification):

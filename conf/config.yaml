@@ -14,11 +14,12 @@ train:
   grid_scoring: 'accuracy'
   downsample_test: False
   num_folds: 10
-  num_feat: 500
-  type_feat_selection: 'univariate' # ['univariate', 'wrapper', 'embedded', 'hybrid']
+  num_feat: 844
+  type_feat_selection: 'hybrid' # ['univariate', 'wrapper', 'embedded', 'hybrid']
 
 paths:
-  dataset: ${hydra:runtime.cwd}/tcga_brca_raw_19036_1053samples.pkl
+  data: ${hydra:runtime.cwd}/data
+  dataset: ${hydra:runtime.cwd}/data/tcga_brca_raw_19036_1053samples.pkl
   experiment: ${hydra:runtime.cwd}/experiments
   model: ${hydra:runtime.cwd}/models
   images: ${hydra:runtime.cwd}/images
