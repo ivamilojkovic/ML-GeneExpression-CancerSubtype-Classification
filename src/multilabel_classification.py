@@ -13,9 +13,12 @@ from scipy.sparse import csr_matrix, lil_matrix
 import xgboost as xgb
 from sklearn.svm import SVC
 from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import GridSearchCV
 import itertools
 from skmultilearn.ensemble import LabelSpacePartitioningClassifier
+from config_model import MULTILABEL_MODEL_PARAMS
+import pickle, time, datetime
 
 class MultiLabelClassification():
     def __init__(self, X_train, y_train, X_test, y_test):
@@ -93,7 +96,7 @@ class MultiLabel_BinaryRelevance(MultiLabelClassification):
     def __init__(self, X_train, y_train, X_test, y_test):
         super().__init__(X_train, y_train, X_test, y_test)
 
-    def train_test(self, model):
+    def train_test(self, model, optimize_model: bool = False) -> pd.DataFrame:
 
         preds, prob_preds = [], []
 
@@ -111,30 +114,263 @@ class MultiLabel_BinaryRelevance(MultiLabelClassification):
 
         clf = BinaryRelevance(base)
 
-        for label in self.labels:
+        if optimize_model:
+            if isinstance(model, LogisticRegression):
+                model_name = 'Logistic Regression'
+            elif isinstance(model, RandomForestClassifier):
+                model_name = 'Random Forest'
+            elif isinstance(model, xgb.XGBClassifier):
+                model_name = 'XGBoost'
+            elif isinstance(model, SVC):
+                model_name = 'SVC'
 
-            clf.fit(self.X_train, self.y_train[label].values)
+            additional_params = {}
+            for key, value in MULTILABEL_MODEL_PARAMS[model_name].items():
+                new_key = 'classifier__' + key
+                additional_params[new_key] = value
+        
+            # Create the grid search object
+            grid_search = GridSearchCV(clf, param_grid=additional_params, scoring='f1_weighted', verbose=3, cv=5)
+
+            # Fit the grid search to the data
+            grid_search.fit(self.X_train, self.y_train)
+
+            # Get the best model
+            clf = grid_search.best_estimator_
+            print(grid_search.best_params_)
+
+            now = datetime.datetime.now().strftime("%d-%m-%Y_%H:%M:%S")
+            with open('ml_best_model_lr' + now + '.pkl', 'wb') as file:
+                pickle.dump(clf, file)
+
             pred = clf.predict(self.X_test).toarray()
             pred_prob = clf.predict_proba(self.X_test).toarray()
 
-            preds.append(pred)
-            prob_preds.append(pred_prob)
+            # Put preds and prob_preds into suitable shape
+            preds = pd.DataFrame(pred, columns=self.labels)
+            prob_preds = pd.DataFrame(pred_prob, columns=self.labels)
 
-        # Put preds and prob_preds into suitable shape
-        preds = pd.DataFrame(np.transpose(preds)[0], columns=self.labels)
-        prob_preds = pd.DataFrame(np.transpose(prob_preds)[0], columns=self.labels)
+        else:
+            for label in self.labels:
 
-        # Compute ranking average precision
-        rank_avg_prec = label_ranking_average_precision_score(self.y_test, prob_preds)
-        print('Ranking average precision: ', rank_avg_prec)
+                clf.fit(self.X_train, self.y_train[label].values)
+                pred = clf.predict(self.X_test).toarray()
+                pred_prob = clf.predict_proba(self.X_test).toarray()
 
-        # Compute average precision score
-        avg_prec = average_precision_score(self.y_test, preds)
-        print('Average precision: ', avg_prec)
+                preds.append(pred)
+                prob_preds.append(pred_prob)
 
-        return preds
+            # Put preds and prob_preds into suitable shape
+            preds = pd.DataFrame(np.transpose(preds)[0], columns=self.labels)
+            prob_preds = pd.DataFrame(np.transpose(prob_preds)[0], columns=self.labels)
+
+        return preds, prob_preds
+
+class MultiLabel_Chains(MultiLabelClassification):
+
+    def __init__(self, X_train, y_train, X_test, y_test):
+        super().__init__(X_train, y_train, X_test, y_test)
+
+    def train_test(self, model, optimize: bool = False, optimize_model: bool = False):
+
+        # Check if model is XGBoost classifier
+        if isinstance(model, xgb.XGBClassifier):
+            xgb_param = model.get_xgb_params()
+            extra = {'objective': 'binary:logistic'}
+            xgb_param.update(extra)
+            base = xgb.XGBClassifier(**xgb_param)
+        elif isinstance(model, SVC):
+            model.probability = True
+            base = model
+        else:
+            base = model
+
+        # Create classifier chain 
+        chain = ClassifierChain(classifier=base, order=[0, 1, 2, 3, 4])
+
+        if optimize:
+            # Define the labels
+            labels = self.y_train.columns
+
+            # Generate all possible permutations of label orders
+            all_orders = list(itertools.permutations([0, 1, 2, 3, 4]))
+            all_orders = [list(order) for order in all_orders]
+
+            # Define the parameter grid for hyperparameter tuning
+            param_grid = {
+                'order': all_orders # Order in which labels are chained
+                }
+            
+            # Create the grid search object
+            grid_search = GridSearchCV(chain, param_grid=param_grid, scoring='f1_weighted', verbose=3)
+
+            # Fit the grid search to the data
+            grid_search.fit(self.X_train, self.y_train)
+
+            # Get best model
+            chain = grid_search.best_estimator_
+        else:
+            chain.fit(self.X_train, self.y_train)
+
+        if optimize_model:
+            if isinstance(model, LogisticRegression):
+                model_name = 'Logistic Regression'
+            elif isinstance(model, RandomForestClassifier):
+                model_name = 'Random Forest'
+            elif isinstance(model, xgb.XGBClassifier):
+                model_name = 'XGBoost'
+            elif isinstance(model, SVC):
+                model_name = 'SVC'
+
+            additional_params = {}
+            for key, value in MULTILABEL_MODEL_PARAMS[model_name].items():
+                new_key = 'classifier__' + key
+                additional_params[new_key] = value
+        
+            # Create the grid search object
+            grid_search = GridSearchCV(chain, param_grid=additional_params, scoring='f1_weighted', cv=5, verbose=3)
+
+            # Fit the grid search to the data
+            grid_search.fit(self.X_train, self.y_train)
+
+            # Get best model
+            chain = grid_search.best_estimator_
+
+            print(grid_search.best_params_)
+
+            now = datetime.datetime.now().strftime("%d-%m-%Y_%H:%M:%S")
+            with open('ml_chain_best_model_lr' + now + '.pkl', 'wb') as file:
+                pickle.dump(chain, file)
+
+        # Compute probability predictions and predictions
+        y_pred = chain.predict(self.X_test).toarray()
+        y_pred_prob = chain.predict_proba(self.X_test).toarray()
+        
+        return pd.DataFrame(y_pred, columns=self.y_test.columns, dtype='int'),\
+              pd.DataFrame(y_pred_prob, columns=self.y_test.columns)
+        
+
+class MultiLabel_PowerSet(MultiLabelClassification):
+
+    def __init__(self, X_train, y_train, X_test, y_test):
+        super().__init__(X_train, y_train, X_test, y_test)
+
+    def train_test(self, model, optimize_model: bool = False):
+
+        # Create XGBoost instance with previously obtained optimal hyper-parameters
+        if isinstance(model, xgb.XGBClassifier):
+            xgb_param = model.get_xgb_params()
+            extra = {'objective': 'binary:logistic'}
+            xgb_param.update(extra)
+            model = xgb.XGBClassifier(**xgb_param)
+        elif isinstance(model, SVC):
+            model.probability = True
+
+        # create MultiOutputClassifier instance with XGBoost model inside
+        clf = LabelPowerset(model)
+
+        if optimize_model:
+            if isinstance(model, LogisticRegression):
+                model_name = 'Logistic Regression'
+            elif isinstance(model, RandomForestClassifier):
+                model_name = 'Random Forest'
+            elif isinstance(model, xgb.XGBClassifier):
+                model_name = 'XGBoost'
+            elif isinstance(model, SVC):
+                model_name = 'SVC'
+
+            additional_params = {}
+            for key, value in MULTILABEL_MODEL_PARAMS[model_name].items():
+                new_key = 'classifier__' + key
+                additional_params[new_key] = value
+
+            # Create the grid search object
+            grid_search = GridSearchCV(clf, param_grid=additional_params, scoring='f1_weighted', verbose=3, cv=5)
+
+            # Fit the grid search to the data
+            grid_search.fit(self.X_train, self.y_train)
+
+            # Get the best model
+            clf = grid_search.best_estimator_
+            print(grid_search.best_params_)
+
+            now = datetime.datetime.now().strftime("%d-%m-%Y_%H:%M:%S")
+            with open('ml_best_model_lr' + now + '.pkl', 'wb') as file:
+                pickle.dump(clf, file)
+
+            pred = clf.predict(self.X_test).toarray()
+            pred_prob = clf.predict_proba(self.X_test).toarray()
+        else:
+            clf.fit(X=self.X_train.values, y=self.y_train)
+
+            # Compute predictions and their probabilities
+            pred = clf.predict(self.X_test.values)
+            pred_prob = clf.predict_proba(self.X_test.values)
+
+        return pd.DataFrame(pred, columns=self.y_test.columns),\
+              pd.DataFrame(pred_prob, columns=self.y_test.columns)
+
+class MultiLabel_Adapted(MultiLabelClassification):
+
+    def __init__(self, X_train, y_train, X_test, y_test):
+        super().__init__(X_train, y_train, X_test, y_test)
+
+    def train_test(self, type: str='MLkNN', optimize: bool=False):
+
+        if type == 'MLkNN':
+
+            classifier = MLkNN(k=20)
+            params = {
+                'k': range(10, 100, 10),
+                's': [0.1, 0.3, 0.5, 1]
+            }
+
+            x_train = lil_matrix(self.X_train.values).toarray()
+            y_train = lil_matrix(self.y_train.values).toarray()
+
+        elif type == 'MLTSVM':
+            classifier = MLTSVM(c_k=0.1, threshold=0.5)
+
+            x_train = lil_matrix(self.X_train.values)
+            y_train = lil_matrix(self.y_train.values)
+
+        elif type == 'MLARAM':
+
+            classifier = MLARAM(threshold=0.05, vigilance=0.9)
+
+            params = {
+                'threshold': [i/10 for i in range(11)],
+                'vigilance': [0.7, 0.8, 0.85, 0.9, 0.95],
+                # 'neurons': [[10, 10, 20], [5, 5, 5], [30, 20, 10]]
+            }
+            x_train = lil_matrix(self.X_train.values).toarray()
+            y_train = lil_matrix(self.y_train.values).toarray()
+
+        if optimize:
+            gs = GridSearchCV(
+                estimator=classifier, 
+                param_grid=params, 
+                scoring='f1_weighted', 
+                cv=5, verbose=3)
+            
+            gs.fit(x_train, y_train)
+            print(gs.best_params_)
+            classifier = gs.best_estimator_
+        else:
+            classifier.fit(x_train, y_train)
+
+        # Compute predictions and their probabilities
+        pred = classifier.predict(self.X_test.values)
+        pred_prob = classifier.predict_proba(self.X_test.values)
+
+        if type != 'MLARAM':
+            pred_prob = pred_prob.todense()
+            pred = pred.todense()
+
+        return pd.DataFrame(pred, columns=self.y_test.columns, dtype='int'), \
+            pd.DataFrame(pred_prob, columns=self.y_test.columns)
     
-    
+
 class MultiLabel_EnsembleChains(MultiLabelClassification):
 
     def __init__(self, X_train, y_train, X_test, y_test):
@@ -157,7 +393,7 @@ class MultiLabel_EnsembleChains(MultiLabelClassification):
         # Randomly select the order for N times 
         chains = [CC(base, 
                     order="random", 
-                    random_state=i, ) for i in range(N)]
+                    random_state=i) for i in range(N)]
         
         # Train each chain
         for chain in tqdm(chains, desc='Chain: '):
@@ -167,16 +403,8 @@ class MultiLabel_EnsembleChains(MultiLabelClassification):
         y_pred_chains = np.array([chain.predict_proba(self.X_test) for chain in chains])
         y_pred_ensemble = y_pred_chains.mean(axis=0)
 
-        # Compute ranking average precision
-        rank_avg_prec = label_ranking_average_precision_score(self.y_test, y_pred_ensemble)
-        print('Ranking average precision: ', rank_avg_prec)
-
         # Take average probability predictions and compute average predictions
         y_pred = (y_pred_ensemble > 0.5).astype('int')
-
-        # Compute average precision score
-        avg_prec = average_precision_score(self.y_test, y_pred)
-        print('Average precision: ', avg_prec)
 
         return pd.DataFrame(y_pred, columns=self.y_test.columns)
     
@@ -218,156 +446,3 @@ class MultiLabel_EnsembleRakel(MultiLabelClassification):
 
         return pd.DataFrame(y_pred, columns=self.y_test.columns)
     
-
-class MultiLabel_Chains(MultiLabelClassification):
-
-    def __init__(self, X_train, y_train, X_test, y_test):
-        super().__init__(X_train, y_train, X_test, y_test)
-
-    def train_test(self, model, optimize: bool = False, optimize_model: bool = False):
-
-        # Check if model is XGBoost classifier
-        if isinstance(model, xgb.XGBClassifier):
-            xgb_param = model.get_xgb_params()
-            extra = {'objective': 'binary:logistic'}
-            xgb_param.update(extra)
-            base = xgb.XGBClassifier(**xgb_param)
-        elif isinstance(model, SVC):
-            model.probability = True
-            base = model
-        else:
-            base = model
-
-        # Create classifier chain 
-        chain = ClassifierChain(classifier=base, order=[0, 1, 2, 3, 4])
-
-        if optimize:
-            # Define the labels
-            labels = self.y_train.columns
-
-            # Generate all possible permutations of label orders
-            all_orders = list(itertools.permutations([0, 1, 2, 3, 4]))
-            all_orders = [list(order) for order in all_orders]
-
-            # Define the parameter grid for hyperparameter tuning
-            param_grid = {
-                'order': all_orders # Order in which labels are chained
-                }
-            
-            if isinstance(model, LogisticRegression):
-                estim_param_grid = {
-                    'classifier__estimator': [base],
-                    'classifier__estimator__C': [0.1, 1, 10]
-                }
-            
-            if optimize_model:
-                param_grid.update(estim_param_grid)
-            
-            # Create the grid search object
-            grid_search = GridSearchCV(chain, param_grid=param_grid, scoring='f1_weighted', verbose=3)
-
-            # Fit the grid search to the data
-            grid_search.fit(self.X_train, self.y_train)
-
-            # Get best model
-            chain = grid_search.best_estimator_
-
-        else:
-            chain.fit(self.X_train, self.y_train)
-
-        # Compute probability predictions and predictions
-        y_pred_prob = chain.predict_proba(self.X_test).toarray()
-        y_pred = chain.predict(self.X_test).toarray()
-
-        # Compute ranking average precision
-        rank_avg_prec = label_ranking_average_precision_score(self.y_test, y_pred_prob)
-        print('Ranking average precision: ', rank_avg_prec)
-
-        # Compute average precision score
-        avg_prec = average_precision_score(self.y_test, y_pred)
-        print('Average precision: ', avg_prec)
-
-        return pd.DataFrame(y_pred, columns=self.y_test.columns, dtype='int')
-
-
-class MultiLabel_Adapted(MultiLabelClassification):
-
-    def __init__(self, X_train, y_train, X_test, y_test):
-        super().__init__(X_train, y_train, X_test, y_test)
-
-    def train_test(self, type: str='MLkNN', model=None):
-
-        if type == 'MLkNN':
-
-            classifier = MLkNN(k=20)
-
-            x_train = lil_matrix(self.X_train.values).toarray()
-            y_train = lil_matrix(self.y_train.values).toarray()
-
-        elif type == 'MLTSVM':
-            classifier = MLTSVM(c_k=0.1, threshold=0.5)
-
-            x_train = lil_matrix(self.X_train.values)
-            y_train = lil_matrix(self.y_train.values)
-
-        elif type == 'MLARAM':
-
-            classifier = MLARAM(threshold=0.05, vigilance=0.9)
-            x_train = lil_matrix(self.X_train.values).toarray()
-            y_train = lil_matrix(self.y_train.values).toarray()
-        
-        classifier.fit(x_train, y_train)
-
-        # Compute predictions and their probabilities
-        pred = classifier.predict(self.X_test.values)
-        pred_prob = classifier.predict_proba(self.X_test.values)
-
-        if type != 'MLARAM':
-            pred_prob = pred_prob.todense()
-            pred = pred.todense()
-        
-        # Compute ranking average precision
-        rank_avg_prec = label_ranking_average_precision_score(self.y_test, pred_prob)
-        print('Ranking average precision: ', rank_avg_prec)
-
-        # Compute average precision score
-        avg_prec = average_precision_score(self.y_test, pred)
-        print('Average precision: ', avg_prec)
-
-        return pd.DataFrame(pred, columns=self.y_test.columns)
-
-
-class MultiLabel_PowerSet(MultiLabelClassification):
-
-    def __init__(self, X_train, y_train, X_test, y_test):
-        super().__init__(X_train, y_train, X_test, y_test)
-
-    def train_test(self, model):
-
-        # Create XGBoost instance with previously obtained optimal hyper-parameters
-        if isinstance(model, xgb.XGBClassifier):
-            xgb_param = model.get_xgb_params()
-            extra = {'objective': 'binary:logistic'}
-            xgb_param.update(extra)
-            model = xgb.XGBClassifier(**xgb_param)
-        elif isinstance(model, SVC):
-            model.probability = True
-
-        # create MultiOutputClassifier instance with XGBoost model inside
-        multilabel_model = LabelPowerset(model)
-        multilabel_model.fit(X=self.X_train.values, y=self.y_train)
-
-        # Compute predictions and their probabilities
-        pred = multilabel_model.predict(self.X_test.values)
-        pred_prob = multilabel_model.predict_proba(self.X_test.values)
-
-        # Compute ranking average precision
-        rank_avg_prec = label_ranking_average_precision_score(self.y_test, pred_prob.todense())
-        print('Ranking average precision: ', rank_avg_prec)
-
-        # Compute average precision score
-        avg_prec = average_precision_score(self.y_test, pred.todense())
-        print('Average precision: ', avg_prec)
-
-        return pd.DataFrame(pred.todense(), columns=self.y_test.columns)
-

@@ -70,3 +70,39 @@ MODEL_PARAMS = {
         'learning_rate': [0.01, 0.03, 0.1, 0.3, 1.0, 10]
     }
 }
+
+MULTILABEL_MODEL_PARAMS = {
+    'Logistic Regression': {
+        'penalty': ['l2', None], 
+        'tol': [1e-1, 1e-2, 1e-3, 1e-4],
+        'solver': ['lbfgs', 'newton-cg', 'sag'],
+        'max_iter': [100],
+        'C': [0.05, 0.1, 0.5, 1, 5],
+    },
+    'XGBoost': {
+        'max_depth': [3, 4, 5, 7],
+        'base_score': [0.5], 
+        'booster': ['gbtree'],
+        'learning_rate': [0.1, 0.01, 0.05],
+        'n_estimators': [50, 100],
+        'reg_alpha': [0], 
+        'reg_lambda': [0, 1, 10],
+        'gamma': [0, 0.25, 1],
+        'subsample': [0.8],
+        'colsample_bytree': [0.5]
+    },
+    'SVC': {
+        'C': [0.01, 0.05, 0.1, 0.5, 1, 5],
+        'kernel': ['poly', 'rbf', 'sigmoid'],
+        'degree': [2, 3, 4, 5, 6],
+        'gamma': ['scale', 'auto'],
+        'tol': [1e-1, 1e-2, 1e-3, 1e-4],
+        'class_weight': [None, 'balanced']
+    },
+    'Random Forest': {
+        'n_estimators':[50, 100, 150], 
+        'criterion': ['gini', 'entropy', 'log_loss'], 
+        'min_samples_split': [2, 3, 4, 5], 
+        'min_samples_leaf': [1, 2, 3]
+    }
+}

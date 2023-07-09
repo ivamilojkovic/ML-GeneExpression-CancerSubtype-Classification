@@ -57,24 +57,36 @@ def m_cut_strategy_class_assignment(orig_data, non_neg_values=False):
     return pd.DataFrame(assigned_labels, columns=data.columns)
         
 
-def plot_class_distribution_comparison(data, y_corr_labels, y_corr_labels_neg):
+def plot_class_distribution_comparison(data, y_mcut_labels, y_5perc_labels, 
+                                       y_10perc_labels=None, y_25perc_labels=None):
 
     # Class distribution (counts) comparison
     ax = plt.figure()
-    df_compare = pd.DataFrame({
-        'Single label assigned by PAM50 maximum correlation': data['Subtype-from Parker centroids'].value_counts(),
-        'Multiple labels M-cut strategy (non-negative correlations)': y_corr_labels.sum(axis=0),
-        'Multiple labels M-cut & 5th percentile strategy (non-negative correlations)': y_corr_labels_neg.sum(axis=0)
-        }, 
-        index=['LumA', 'LumB',	'Basal', 'Her2', 'Normal'])
-    ax = df_compare.plot(kind='bar', rot=30, title='Class distribution comparison')
+    if y_10perc_labels is not None and y_25perc_labels is not None:
+        df_compare = pd.DataFrame({
+            'Single label assigned by PAM50 maximum correlation': data['Subtype-from Parker centroids'].value_counts(),
+            'Multiple labels M-cut strategy (non-negative correlations)': y_mcut_labels.sum(axis=0),
+            'Multiple labels M-cut & 5th percentile strategy (non-negative correlations)': y_5perc_labels.sum(axis=0),
+            'Multiple labels M-cut & 10th percentile strategy (non-negative correlations)': y_10perc_labels.sum(axis=0),
+            'Multiple labels M-cut & 25th percentile strategy (non-negative correlations)': y_25perc_labels.sum(axis=0)
+            }, 
+            index=['LumA', 'LumB',	'Basal', 'Her2', 'Normal'])
+    else:
+         df_compare = pd.DataFrame({
+            'Single label assigned by PAM50 maximum correlation': data['Subtype-from Parker centroids'].value_counts(),
+            'Multiple labels M-cut strategy (non-negative correlations)': y_mcut_labels.sum(axis=0),
+            'Multiple labels M-cut & 5th percentile strategy (non-negative correlations)': y_5perc_labels.sum(axis=0),
+            }, 
+            index=['LumA', 'LumB',	'Basal', 'Her2', 'Normal'])
+         
+    ax = df_compare.plot(kind='bar', rot=30, title='Class distribution comparison', width=0.7)
     for g in ax.patches:
         ax.annotate(format(g.get_height(),),
                     (g.get_x() + g.get_width() / 2., g.get_height()),
                     ha = 'center', va = 'center',
                     xytext = (0, 5),
                     textcoords = 'offset points',
-                    fontsize=6)
+                    fontsize=4)
 
 
 def count_number_of_labels(predictions):
@@ -136,27 +148,40 @@ def plot_bar_counts_of_label(
                     fontsize=4)
     plt.legend(loc='upper right')
     return ax
-        
-def plot_stacked_bars(y_new, y_corr_labels, y_5perc_labels):
+
+def plot_stacked_bars(y, y_mcut_labels, y_5perc_labels, y_10perc_labels, y_25perc_labels):
+
+    class_names = ['LumA', 'LumB', 'Basal', 'Her2', 'Normal']
 
     # Generate some random data for the bars
     num_bars = 5
     num_colors = 5
-    
-    class_names = ['LumA', 'LumB',	'Basal', 'Her2', 'Normal']
-    data = np.zeros(shape=(num_bars, num_colors))
-    data2 = np.zeros(shape=(num_bars, num_colors))
+
+    data_mcut = np.zeros(shape=(num_bars, num_colors))
+    data_5perc = np.zeros(shape=(num_bars, num_colors))
+    data_10perc = np.zeros(shape=(num_bars, num_colors))
+    data_25perc = np.zeros(shape=(num_bars, num_colors))
 
     for i, label_y in enumerate(class_names):
         for j, label_corr in enumerate(class_names):
-            val = y_corr_labels[label_corr][y_new==label_y].sum()
-            data[i][j] = val
+            val = y_mcut_labels[label_corr][y == label_y].sum()
+            data_mcut[i][j] = val
 
     for i, label_y in enumerate(class_names):
         for j, label_corr in enumerate(class_names):
-            val = y_5perc_labels[label_corr][y_new==label_y].sum()
-            data2[i][j] = val
-            
+            val = y_5perc_labels[label_corr][y == label_y].sum()
+            data_5perc[i][j] = val
+
+    for i, label_y in enumerate(class_names):
+        for j, label_corr in enumerate(class_names):
+            val = y_10perc_labels[label_corr][y == label_y].sum()
+            data_10perc[i][j] = val
+
+    for i, label_y in enumerate(class_names):
+        for j, label_corr in enumerate(class_names):
+            val = y_25perc_labels[label_corr][y == label_y].sum()
+            data_25perc[i][j] = val
+
     # Define the colors for the bars
     palette = sns.color_palette("deep", num_colors)
 
@@ -167,22 +192,35 @@ def plot_stacked_bars(y_new, y_corr_labels, y_5perc_labels):
     x = np.arange(num_bars)
 
     # Plot the stacked bars
-    # Plot the stacked bars
-    width = 0.35
+    width = 0.16
 
-    # Plot the first set of stacked bars
+    # Plot the stacked bars for mcut
     bottom = np.zeros(num_bars)
     for i in range(num_colors):
-        ax.bar(x - 0.02 - width/2, data[:, i], width, bottom=bottom, 
-               label=class_names[i], color=palette[i])
-        bottom += data[:, i]
+        ax.bar(x - 0.19 - width/2, data_mcut[:, i], width, bottom=bottom,
+            label=class_names[i], color=palette[i])
+        bottom += data_mcut[:, i]
 
-    # Plot the second set of stacked bars
+    # Plot the stacked bars for 5perc
     bottom = np.zeros(num_bars)
     for i in range(num_colors):
-        ax.bar(x + 0.02 + width/2, data2[:, i], width, bottom=bottom, 
-               label=class_names[i], color=palette[i])
-        bottom += data2[:, i]
+        ax.bar(x - 0.01 - width/2, data_5perc[:, i], width, bottom=bottom,
+            label=class_names[i], color=palette[i])
+        bottom += data_5perc[:, i]
+
+    # Plot the stacked bars for 10perc
+    bottom = np.zeros(num_bars)
+    for i in range(num_colors):
+        ax.bar(x + 0.01 + width/2, data_10perc[:, i], width, bottom=bottom,
+            label=class_names[i], color=palette[i])
+        bottom += data_10perc[:, i]
+
+    # Plot the stacked bars for 25perc
+    bottom = np.zeros(num_bars)
+    for i in range(num_colors):
+        ax.bar(x + 0.19 + width/2, data_25perc[:, i], width, bottom=bottom,
+            label=class_names[i], color=palette[i])
+        bottom += data_25perc[:, i]
 
     # Customize the plot
     ax.set_xticks(x)
@@ -193,79 +231,100 @@ def plot_stacked_bars(y_new, y_corr_labels, y_5perc_labels):
 
     return ax
 
-def plot_stacked_bars_primary_secondary_label_assigned(y_mcut_labels, y_pam50):
+
+def plot_stacked_bars_primary_secondary_label_assigned(y, y_mcut_labels, y_5perc_labels, y_10perc_labels, y_25perc_labels):
+
+    class_names = ['LumA', 'LumB', 'Basal', 'Her2', 'Normal']
 
     # Generate some random data for the bars
     num_bars = 5
     num_colors = 2
-    
-    class_names = ['LumA', 'LumB',	'Basal', 'Her2', 'Normal']
 
-    primary, secondary = {}, {}
-    for i, label_pam50 in enumerate(y_pam50):
+    data_mcut = np.zeros(shape=(num_colors, num_bars))
+    data_5perc = np.zeros(shape=(num_colors, num_bars))
+    data_10perc = np.zeros(shape=(num_colors, num_bars))
+    data_25perc = np.zeros(shape=(num_colors, num_bars))
 
-        if y_mcut_labels.iloc[i, :][label_pam50] == 1:
-            if label_pam50 not in primary:
-                primary[label_pam50] = 0
-            primary[label_pam50] += 1
+    for i, label_y in enumerate(class_names):
+        val = y_mcut_labels[label_y][y == label_y].sum()
+        data_mcut[0][i] = val
+        val = y_mcut_labels[label_y][y != label_y].sum()
+        data_mcut[1][i] = val
 
-        if y_mcut_labels.iloc[i, :].sum() > 1: # there are other labels assigned 
-            sec_labels = (y_mcut_labels.columns[y_mcut_labels.iloc[i, :] == 1]).tolist() 
-            for sec_label in sec_labels:
-                if sec_labels != label_pam50:
-                    if sec_label not in secondary:
-                        secondary[sec_label] = 0
-                    secondary[sec_label] += 1
+    for i, label_y in enumerate(class_names):
+        val = y_5perc_labels[label_y][y == label_y].sum()
+        data_5perc[0][i] = val
+        val = y_5perc_labels[label_y][y != label_y].sum()
+        data_5perc[1][i] = val
 
-    # Concatenate Dictionary string values
-    res = {key: [primary[key]] + [secondary[key]] for key in class_names}
-    result = res.values()
-    class_names = list(res.keys())
- 
-    # Convert object to a list
-    data = list(result)
-    
-    # Convert list to an array
-    data = np.array(data).transpose()
-            
+    for i, label_y in enumerate(class_names):
+        val = y_10perc_labels[label_y][y == label_y].sum()
+        data_10perc[0][i] = val
+        val = y_10perc_labels[label_y][y != label_y].sum()
+        data_10perc[1][i] = val
+
+    for i, label_y in enumerate(class_names):
+        val = y_25perc_labels[label_y][y == label_y].sum()
+        data_25perc[0][i] = val
+        val = y_25perc_labels[label_y][y != label_y].sum()
+        data_25perc[1][i] = val
+
     # Define the colors for the bars
-    palette = sns.color_palette("deep", num_colors)
+    palette = ["#342D7E", "#5453A6", "#347C17", "#89C35C", "#FF4500",  "#F8B88B", 
+               "#0000A5", "#1E90FF", "#E9AB17", "#EDDA74"]
 
     # Create a figure and axis
     fig, ax = plt.subplots()
 
     # Set the positions of the bars on the x-axis
-    bars = np.arange(num_bars)
+    x = np.arange(num_bars)
 
     # Plot the stacked bars
-    width = 0.5
+    width = 0.16
 
-    # Plot the first set of stacked bars
+    # Plot the stacked bars for mcut
     bottom = np.zeros(num_bars)
     for i in range(num_colors):
-        ax.bar(bars, data[i, :], width, bottom=bottom, 
-               label=class_names[i], color=palette[i])
-        bottom += data[i, :]
+        ax.bar(x - 0.19 - width/2, data_mcut[i, :], width, bottom=bottom,
+            label=class_names, color=palette[i::2])
+        bottom += data_mcut[i, :]
 
-    # Add height labels on top of each part of the bar
+    # Plot the stacked bars for 5perc
+    bottom = np.zeros(num_bars)
     for i in range(num_colors):
-        for j in range(num_bars):
-            label_x = bars[j]
-            if i==0:
-                label_y = data[i, j] / 2
-            else:
-                label_y = bottom[j] - data[i, j] / 2
+        ax.bar(x - 0.01 - width/2, data_5perc[i, :], width, bottom=bottom,
+            label=class_names[i], color=palette[i::2])
+        bottom += data_5perc[i, :]
 
-            ax.text(label_x, label_y, str(data[i, j]), ha='center', va='center')
+    # Plot the stacked bars for 10perc
+    bottom = np.zeros(num_bars)
+    for i in range(num_colors):
+        ax.bar(x + 0.01 + width/2, data_10perc[i, :], width, bottom=bottom,
+            label=class_names[i], color=palette[i::2])
+        bottom += data_10perc[i, :]
 
-
+    # Plot the stacked bars for 25perc
+    bottom = np.zeros(num_bars)
+    for i in range(num_colors):
+        ax.bar(x + 0.19 + width/2, data_25perc[i, :], width, bottom=bottom,
+            label=class_names[i], color=palette[i::2])
+        bottom += data_25perc[i, :]
 
     # Customize the plot
-    ax.set_xticks(bars)
+    ax.set_xticks(x)
     ax.set_xticklabels(class_names)
-    ax.set_ylabel('Label counts')
-    ax.set_xlabel('labels')
-    ax.legend(['Primary label', 'Secondary label'])
+    ax.set_ylabel('Labels correlation values - counts')
+    ax.set_xlabel('PAM50 label')
+
+    # Create legend
+    legend_names = []
+    for i, name in enumerate(class_names*2):
+        if i//5 == 0:
+            legend_names.append(name + ' (primary)')
+        else:
+            legend_names.append(name + ' (secondary)')
+
+    ax.legend(legend_names)
 
     return ax
 
