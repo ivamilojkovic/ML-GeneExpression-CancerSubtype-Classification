@@ -73,14 +73,14 @@ MODEL_PARAMS = {
 
 MULTILABEL_MODEL_PARAMS = {
     'Logistic Regression': {
-        'penalty': ['l2', None], 
+        'penalty': ['l2'], 
         'tol': [1e-1, 1e-2, 1e-3, 1e-4],
-        'solver': ['lbfgs', 'newton-cg', 'sag'],
+        'solver': ['lbfgs', 'sag'],
         'max_iter': [100],
         'C': [0.05, 0.1, 0.5, 1, 5],
     },
     'XGBoost': {
-        'max_depth': [3, 4, 5, 7],
+        'max_depth': [4, 5],
         'base_score': [0.5], 
         'booster': ['gbtree'],
         'learning_rate': [0.1, 0.01, 0.05],
@@ -94,10 +94,10 @@ MULTILABEL_MODEL_PARAMS = {
     'SVC': {
         'C': [0.01, 0.05, 0.1, 0.5, 1, 5],
         'kernel': ['poly', 'rbf', 'sigmoid'],
-        'degree': [2, 3, 4, 5, 6],
-        'gamma': ['scale', 'auto'],
+        'degree': [3, 4, 5, 6],
+        'gamma': ['auto'],
         'tol': [1e-1, 1e-2, 1e-3, 1e-4],
-        'class_weight': [None, 'balanced']
+        'class_weight': ['balanced']
     },
     'Random Forest': {
         'n_estimators':[50, 100, 150], 

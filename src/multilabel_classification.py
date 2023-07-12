@@ -3,7 +3,7 @@ from skmultilearn.adapt import MLkNN, MLTSVM, MLARAM
 from skmultilearn.ensemble import RakelD, RakelO
 from sklearn.multiclass import OneVsOneClassifier, OneVsRestClassifier
 from sklearn.pipeline import Pipeline
-from sklearn.multioutput import ClassifierChain as CC
+from sklearn.multioutput import ClassifierChain as CC, MultiOutputClassifier
 from sklearn.metrics import accuracy_score, recall_score, precision_score, f1_score, \
     average_precision_score, label_ranking_average_precision_score, label_ranking_loss
 from tqdm import tqdm
@@ -376,7 +376,7 @@ class MultiLabel_EnsembleChains(MultiLabelClassification):
     def __init__(self, X_train, y_train, X_test, y_test):
         super().__init__(X_train, y_train, X_test, y_test)
 
-    def train_test(self, model, N=50):
+    def train_test(self, model, N: int=50, optimize: bool=False):
 
         # Check if model is XGBoost classifier
         if isinstance(model, xgb.XGBClassifier):
@@ -394,26 +394,73 @@ class MultiLabel_EnsembleChains(MultiLabelClassification):
         chains = [CC(base, 
                     order="random", 
                     random_state=i) for i in range(N)]
+        # chains = [ClassifierChain(classifier=base) for _ in range(N)]
+
+        classifier = MultiOutputClassifier(chains)
+
+        # Define the pipeline including any preprocessing steps
+        pipeline = Pipeline([
+            ('classifier', classifier)
+        ])
+
+        if optimize:
+            if isinstance(model, LogisticRegression):
+                model_name = 'Logistic Regression'
+            elif isinstance(model, RandomForestClassifier):
+                model_name = 'Random Forest'
+            elif isinstance(model, xgb.XGBClassifier):
+                model_name = 'XGBoost'
+            elif isinstance(model, SVC):
+                model_name = 'SVC'
+
+            additional_params = {'classifier__estimator': [base]}
+            for key, value in MULTILABEL_MODEL_PARAMS[model_name].items():
+                new_key = 'classifier__estimator__' + key
+                additional_params[new_key] = value
+
+            # Create the grid search object
+            grid_search = GridSearchCV(pipeline, param_grid=additional_params, scoring='f1_weighted', cv=5, verbose=3)
+
+            # Fit the grid search to the data
+            grid_search.fit(self.X_train, self.y_train)
+
+            # Get best model
+            classifier = grid_search.best_estimator_
+
+            print(grid_search.best_params_)
+
+            now = datetime.datetime.now().strftime("%d-%m-%Y_%H:%M:%S")
+            with open('bestmodel_ECC_' + now + '.pkl', 'wb') as file:
+                pickle.dump(classifier, file)
+            with open('bestparam_ECC_' + now + '.pkl', 'wb') as file:
+                pickle.dump(grid_search.best_params_, file)
+
+        else:
+            # Train each chain
+            # for chain in tqdm(chains, desc='Chain: '):
+            #     chain.fit(self.X_train, self.y_train)
+            classifier.fit(self.X_train, self.y_train)
+
+        # Compute probability predictions and predictions
+        pred = classifier.predict(self.X_test)
+        pred_prob = np.array([arr[:, 1] for arr in classifier.predict_proba(self.X_test)]).T
         
-        # Train each chain
-        for chain in tqdm(chains, desc='Chain: '):
-            chain.fit(self.X_train, self.y_train)
+        # # Compute probability predictions for each chain and average them
+        # y_pred_chains = np.array([chain.predict_proba(self.X_test) for chain in chains])
+        # y_pred_ensemble = y_pred_chains.mean(axis=0)
 
-        # Compute probability predictions for each chain and average them
-        y_pred_chains = np.array([chain.predict_proba(self.X_test) for chain in chains])
-        y_pred_ensemble = y_pred_chains.mean(axis=0)
+        # # Take average probability predictions and compute average predictions
+        # y_pred = (y_pred_ensemble > 0.5).astype('int')
 
-        # Take average probability predictions and compute average predictions
-        y_pred = (y_pred_ensemble > 0.5).astype('int')
-
-        return pd.DataFrame(y_pred, columns=self.y_test.columns)
+        return pd.DataFrame(pred, columns=self.y_test.columns, dtype='int'),\
+              pd.DataFrame(pred_prob, columns=self.y_test.columns)
     
 class MultiLabel_EnsembleRakel(MultiLabelClassification):
 
     def __init__(self, X_train, y_train, X_test, y_test):
         super().__init__(X_train, y_train, X_test, y_test)
 
-    def train_test(self, model, type='distinct'):
+    def train_test(self, model, optimize: bool=False, type: str='distinct'):
 
         # Check if model is XGBoost classifier
         if isinstance(model, xgb.XGBClassifier):
@@ -428,21 +475,54 @@ class MultiLabel_EnsembleRakel(MultiLabelClassification):
             base = model
 
         if type=='distinct':
-            clf = RakelD(base_classifier=base, labelset_size=3)
+            classifier = RakelD(base_classifier=base, labelset_size=3)
         elif type=='overlapping':
+            raise NotImplementedError
             clf = RakelO(base_classifier=base, labelset_size=3, model_count=2*5)
-        clf.fit(self.X_train, self.y_train)
 
-        y_pred = clf.predict(self.X_test).toarray()
-        y_pred_prob = clf.predict_proba(self.X_test).toarray()
+        if optimize:
+            if isinstance(model, LogisticRegression):
+                model_name = 'Logistic Regression'
+            elif isinstance(model, RandomForestClassifier):
+                model_name = 'Random Forest'
+            elif isinstance(model, xgb.XGBClassifier):
+                model_name = 'XGBoost'
+            elif isinstance(model, SVC):
+                model_name = 'SVC'
 
-        # Compute ranking average precision
-        rank_avg_prec = label_ranking_average_precision_score(self.y_test,y_pred_prob)
-        print('Ranking average precision: ', rank_avg_prec)
+            classifier = Pipeline([('classifier', classifier)])
 
-        # Compute average precision score
-        avg_prec = average_precision_score(self.y_test, y_pred)
-        print('Average precision: ', avg_prec)
+            additional_params = {
+                'classifier__labelset_size': [2, 3, 4],
+                'classifier__base_classifier': [model]
+            }
 
-        return pd.DataFrame(y_pred, columns=self.y_test.columns)
-    
+            for key, value in MULTILABEL_MODEL_PARAMS[model_name].items():
+                new_key = 'classifier__base_classifier__' + key
+                additional_params[new_key] = value
+
+            # Create the grid search object
+            grid_search = GridSearchCV(classifier, param_grid=additional_params, scoring='f1_weighted', cv=5, verbose=1)
+
+            # Fit the grid search to the data
+            grid_search.fit(self.X_train, self.y_train)
+
+            # Get best model
+            classifier = grid_search.best_estimator_
+
+            print(grid_search.best_params_)
+
+            now = datetime.datetime.now().strftime("%d-%m-%Y_%H:%M:%S")
+            with open('bestmodel_rakel_' + now + '.pkl', 'wb') as file:
+                pickle.dump(classifier, file)
+            with open('bestparam_rakel_' + now + '.pkl', 'wb') as file:
+                pickle.dump(grid_search.best_params_, file)
+
+        else:
+            classifier.fit(self.X_train, self.y_train)
+
+        pred = classifier.predict(self.X_test).toarray()
+        pred_prob = classifier.predict_proba(self.X_test).toarray()
+
+        return pd.DataFrame(pred, columns=self.y_test.columns, dtype='int'),\
+              pd.DataFrame(pred_prob, columns=self.y_test.columns)

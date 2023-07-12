@@ -9,6 +9,7 @@
 /mlruns
 /outputs
 /models
+/results
 
 # Ignore dataset
 *.pkl

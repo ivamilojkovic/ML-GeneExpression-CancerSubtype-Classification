@@ -270,8 +270,11 @@ def plot_stacked_bars_primary_secondary_label_assigned(y, y_mcut_labels, y_5perc
         data_25perc[1][i] = val
 
     # Define the colors for the bars
-    palette = ["#342D7E", "#5453A6", "#347C17", "#89C35C", "#FF4500",  "#F8B88B", 
-               "#0000A5", "#1E90FF", "#E9AB17", "#EDDA74"]
+    palette = ["#342D7E", "#5453A6", 
+               "#347C17", "#89C35C", 
+               "#FF4500",  "#F8B88B", 
+               "#0000A5", "#1E90FF", 
+               "#E9AB17", "#EDDA74"]
 
     # Create a figure and axis
     fig, ax = plt.subplots()
