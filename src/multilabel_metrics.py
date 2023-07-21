@@ -1,8 +1,14 @@
 from sklearn.metrics import accuracy_score, f1_score, precision_score, roc_auc_score, \
     recall_score, matthews_corrcoef, hamming_loss, \
     label_ranking_average_precision_score, average_precision_score
+import numpy as np
 
 def relaxed_accuracy(y_true, y_pred):
+
+    """ Relaxed accuracy is an indicator how well the model predicts the primary class, 
+        not taking into account if the predicted label is the one with the higest probability 
+        prediction i.e. all the predicted labels are threated equally. 
+    """
 
     num_instances = len(y_true)
     correct_instances = 0
@@ -16,6 +22,24 @@ def relaxed_accuracy(y_true, y_pred):
                 correct_instances += 1
 
     return correct_instances / num_instances
+
+def semi_relaxed_accuracy(y_prob_pred, y_true):
+
+    """Semi-relaxed accuracy is an indicator how well the model predicts the primary class, 
+        taking into account if the predicted label is the one with the higest probability 
+        prediction i.e. the predicted labels are not threated equally. 
+    """
+
+    num_instances = y_prob_pred.shape[0]
+    correct_instances = 0
+
+    for i in range(num_instances):
+        max_label = y_prob_pred.iloc[i,:].idxmax()
+        if y_true.iloc[i, :][max_label] == 1:
+            correct_instances += 1
+
+    return correct_instances / num_instances
+
 
 def partial_accuracy(y_true, y_pred):
 
