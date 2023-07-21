@@ -10,6 +10,7 @@ import matplotlib
 from utils import *
 from multilabel_metrics import *
 import mlflow
+import json
 
 # Set parameters
 plt.style.use('ggplot')
@@ -135,8 +136,8 @@ with open('data/dataset_multilabel.pkl', 'rb') as file:
 # Logistic Regression ---- 'run_21-06-2023_20:22:21.pkl',
 # Support Vector Machine - 'run_21-06-2023_21:42:11.pkl'
 
-# best_model_name = 'bestmodel_' + 'run_08-05-2023_10:32:03.pkl'
-best_model_name = 'bestmodel_' + 'run_21-06-2023_19:09:12.pkl'
+best_model_name = 'bestmodel_' + 'run_08-05-2023_10:32:03.pkl'
+# best_model_name = 'bestmodel_' + 'run_21-06-2023_19:09:12.pkl'
 # best_model_name = 'bestmodel_' + 'run_21-06-2023_20:22:21.pkl'
 # best_model_name = 'bestmodel_' + 'run_21-06-2023_21:42:11.pkl'
 
@@ -156,7 +157,7 @@ elif isinstance(model, SVC):
 
 PROBLEM_TRANSF = {
     'Binary Relevance': False,
-    'Chain Classifier': False,
+    'Chain Classifier': True,
     'Label Powerset': False
 }
 
@@ -166,7 +167,7 @@ ALGO_ADAPT = {
 }
 
 ENSEMBLE = {
-    'Chain Classifiers': True,
+    'Chain Classifiers': False,
     'RAKEL': False
 }
 
@@ -175,44 +176,55 @@ if PROBLEM_TRANSF['Binary Relevance']:
 
     print('------------- Binary Relenace -------------')
 
-    BR_mcut = MultiLabel_BinaryRelevance(
-        X_train=X_train_scaled_selected,
-        X_test=X_test_scaled_selected,
-        y_train=y_train_mcut, 
-        y_test=y_test_mcut)
-    predictions_mcut, prob_predictions_mcut = \
-        BR_mcut.train_test(model, optimize_model=True)
+    # BR_mcut = MultiLabel_BinaryRelevance(
+    #     X_train=X_train_scaled_selected,
+    #     X_test=X_test_scaled_selected,
+    #     y_train=y_train_mcut, 
+    #     y_test=y_test_mcut)
+    # predictions_mcut, prob_predictions_mcut = \
+    #     BR_mcut.train_test(model, optimize_model=True)
 
-    print('-- PAM50 case labels after M-cut strategy:')
-    print_all_scores(y_test_mcut, predictions_mcut, prob_predictions_mcut, 
-                    y_test_orig, y_test_pam50, 
-                    txt_file_name=os.path.join(results_path, 'BR_' + model_name + '_mcut.txt'))
+    # print('-- PAM50 case labels after M-cut strategy:')
+    # print_all_scores(y_test_mcut, predictions_mcut, prob_predictions_mcut, 
+    #                 y_test_orig, y_test_pam50, 
+    #                 txt_file_name=os.path.join(results_path, 'BR_' + model_name + '_mcut.txt'))
 
     BR_5perc = MultiLabel_BinaryRelevance(
         X_train=X_train_scaled_selected,
         X_test=X_test_scaled_selected,
         y_train=y_train_5perc, 
         y_test=y_test_5perc)
-    predictions_5perc, prob_predictions_5perc = \
+    predictions_5perc, prob_predictions_5perc, best_model, best_params, cv_scores = \
         BR_5perc.train_test(model, optimize_model=True)
 
     print('-- PAM50 case labels after M-cut and 5th percentile strategy:')
     print_all_scores(y_test_5perc, predictions_5perc, prob_predictions_5perc, 
                     y_test_orig, y_test_pam50, 
                     txt_file_name=os.path.join(results_path, 'BR_' + model_name + '_mcut_5perc.txt'))
+    
+    with open(os.path.join(results_path, 'BR_' + model_name + '_mcut_5perc_predictions.pkl'), 'wb') as f:
+        pickle.dump(predictions_5perc, f)
+    with open(os.path.join(results_path, 'BR_' + model_name + '_mcut_5perc_prob_predictions.pkl'), 'wb') as f:
+        pickle.dump(predictions_5perc, f)
+    with open(os.path.join(results_path, 'BR_' + model_name + '_mcut_5perc_bestmodel.pkl'), 'wb') as f:
+        pickle.dump(best_model, f)
+    with open(os.path.join(results_path, 'BR_' + model_name + '_mcut_5perc_bestparams.pkl'), 'wb') as f:
+        pickle.dump(best_params, f)
+    with open(os.path.join(results_path, 'BR_' + model_name + '_mcut_5perc_cv_scores.json'), "w") as f:
+        json.dump(cv_scores, f)
 
-    BR_10perc = MultiLabel_BinaryRelevance(
-        X_train=X_train_scaled_selected,
-        X_test=X_test_scaled_selected,
-        y_train=y_train_10perc, 
-        y_test=y_test_10perc)
-    predictions_10perc, prob_predictions_10perc = \
-        BR_10perc.train_test(model, optimize_model=True)
+    # BR_10perc = MultiLabel_BinaryRelevance(
+    #     X_train=X_train_scaled_selected,
+    #     X_test=X_test_scaled_selected,
+    #     y_train=y_train_10perc, 
+    #     y_test=y_test_10perc)
+    # predictions_10perc, prob_predictions_10perc = \
+    #     BR_10perc.train_test(model, optimize_model=True)
 
-    print('-- PAM50 case labels after M-cut and 10th percentile strategy:')
-    print_all_scores(y_test_10perc, predictions_10perc, prob_predictions_10perc, 
-                    y_test_orig, y_test_pam50, 
-                    txt_file_name=os.path.join(results_path,'BR_' + model_name + '_mcut_10perc.txt'))
+    # print('-- PAM50 case labels after M-cut and 10th percentile strategy:')
+    # print_all_scores(y_test_10perc, predictions_10perc, prob_predictions_10perc, 
+    #                 y_test_orig, y_test_pam50, 
+    #                 txt_file_name=os.path.join(results_path,'BR_' + model_name + '_mcut_10perc.txt'))
 
     # BR_25perc = MultiLabel_BinaryRelevance(
     #     X_train=X_train_scaled_selected,
@@ -231,41 +243,53 @@ if PROBLEM_TRANSF['Chain Classifier']:
 
     print('------------- Classifier Chain -------------')
 
-    CC_mcut = MultiLabel_Chains(
-        X_train=X_train_scaled_selected,
-        X_test=X_test_scaled_selected,
-        y_train=y_train_mcut, 
-        y_test=y_test_mcut)
-    predictions_mcut, prob_predictions_mcut = CC_mcut.train_test(model, optimize=False, optimize_model=True)
+    # CC_mcut = MultiLabel_Chains(
+    #     X_train=X_train_scaled_selected,
+    #     X_test=X_test_scaled_selected,
+    #     y_train=y_train_mcut, 
+    #     y_test=y_test_mcut)
+    # predictions_mcut, prob_predictions_mcut = CC_mcut.train_test(model, optimize=False, optimize_model=True)
 
-    print('-- PAM50 case labels after M-cut strategy:')
-    print_all_scores(y_test_mcut, predictions_mcut, prob_predictions_mcut, 
-                    y_test_orig, y_test_pam50, 
-                    txt_file_name=os.path.join(results_path, 'CC_' + model_name + '_mcut.txt'))
+    # print('-- PAM50 case labels after M-cut strategy:')
+    # print_all_scores(y_test_mcut, predictions_mcut, prob_predictions_mcut, 
+    #                 y_test_orig, y_test_pam50, 
+    #                 txt_file_name=os.path.join(results_path, 'CC_' + model_name + '_mcut.txt'))
 
     CC_5perc = MultiLabel_Chains(
         X_train=X_train_scaled_selected,
         X_test=X_test_scaled_selected,
         y_train=y_train_5perc, 
         y_test=y_test_5perc)
-    predictions_5perc, prob_predictions_5perc = CC_5perc.train_test(model,  optimize=False, optimize_model=True)
+    predictions_5perc, prob_predictions_5perc, best_model, best_params, cv_scores = \
+        CC_5perc.train_test(model,  optimize=True, optimize_model=True)
 
     print('-- PAM50 case labels after M-cut and 5th percentile strategy:')
     print_all_scores(y_test_5perc, predictions_5perc, prob_predictions_5perc, 
                     y_test_orig, y_test_pam50, 
                     txt_file_name=os.path.join(results_path,'CC_' + model_name + '_mcut_5perc.txt'))
+    
+    with open(os.path.join(results_path, 'CC_' + model_name + '_mcut_5perc_predictions.pkl')) as f:
+        pickle.dump(predictions_5perc, f)
+    with open(os.path.join(results_path, 'CC_' + model_name + '_mcut_5perc_prob_predictions.pkl')) as f:
+        pickle.dump(predictions_5perc, f)
+    with open(os.path.join(results_path, 'CC_' + model_name + '_mcut_5perc_bestmodel.pkl'), 'wb') as f:
+        pickle.dump(best_model, f)
+    with open(os.path.join(results_path, 'CC_' + model_name + '_mcut_5perc_bestparams.pkl'), 'wb') as f:
+        pickle.dump(best_params, f)
+    with open(os.path.join(results_path, 'CC_' + model_name + '_mcut_5perc_cv_scores.json'), "w") as f:
+        json.dump(cv_scores, f)
 
-    CC_10perc = MultiLabel_Chains(
-        X_train=X_train_scaled_selected,
-        X_test=X_test_scaled_selected,
-        y_train=y_train_10perc, 
-        y_test=y_test_10perc)
-    predictions_10perc, prob_predictions_10perc = CC_10perc.train_test(model,  optimize=False, optimize_model=True)
+    # CC_10perc = MultiLabel_Chains(
+    #     X_train=X_train_scaled_selected,
+    #     X_test=X_test_scaled_selected,
+    #     y_train=y_train_10perc, 
+    #     y_test=y_test_10perc)
+    # predictions_10perc, prob_predictions_10perc = CC_10perc.train_test(model,  optimize=False, optimize_model=True)
 
-    print('-- PAM50 case labels after M-cut and 10th percentile strategy:')
-    print_all_scores(y_test_10perc, predictions_10perc, prob_predictions_10perc, 
-                    y_test_orig, y_test_pam50, 
-                    txt_file_name=os.path.join(results_path,'CC_' + model_name + '_mcut_10perc.txt'))
+    # print('-- PAM50 case labels after M-cut and 10th percentile strategy:')
+    # print_all_scores(y_test_10perc, predictions_10perc, prob_predictions_10perc, 
+    #                 y_test_orig, y_test_pam50, 
+    #                 txt_file_name=os.path.join(results_path,'CC_' + model_name + '_mcut_10perc.txt'))
 
     # CC_25perc = MultiLabel_Chains(
     #     X_train=X_train_scaled_selected,
@@ -284,41 +308,53 @@ if PROBLEM_TRANSF['Chain Classifier']:
 if PROBLEM_TRANSF['Label Powerset']:
     print('------------- Label PowerSet -------------')
 
-    LP_mcut = MultiLabel_PowerSet(
-        X_train=X_train_scaled_selected,
-        X_test=X_test_scaled_selected,
-        y_train=y_train_mcut, 
-        y_test=y_test_mcut)
-    predictions_mcut, prob_predictions_mcut  = LP_mcut.train_test(model, optimize_model=True)
+    # LP_mcut = MultiLabel_PowerSet(
+    #     X_train=X_train_scaled_selected,
+    #     X_test=X_test_scaled_selected,
+    #     y_train=y_train_mcut, 
+    #     y_test=y_test_mcut)
+    # predictions_mcut, prob_predictions_mcut  = LP_mcut.train_test(model, optimize_model=True)
 
-    print('-- PAM50 case labels after M-cut strategy:')
-    print_all_scores(y_test_mcut, predictions_mcut, prob_predictions_mcut, 
-                    y_test_orig, y_test_pam50, 
-                    txt_file_name=os.path.join(results_path, 'LP_' + model_name + '_mcut.txt'))
+    # print('-- PAM50 case labels after M-cut strategy:')
+    # print_all_scores(y_test_mcut, predictions_mcut, prob_predictions_mcut, 
+    #                 y_test_orig, y_test_pam50, 
+    #                 txt_file_name=os.path.join(results_path, 'LP_' + model_name + '_mcut.txt'))
 
     LP_5perc = MultiLabel_PowerSet(
         X_train=X_train_scaled_selected,
         X_test=X_test_scaled_selected,
         y_train=y_train_5perc, 
         y_test=y_test_5perc)
-    predictions_5perc, prob_predictions_5perc = LP_5perc.train_test(model, optimize_model=True)
+    predictions_5perc, prob_predictions_5perc, best_model, best_params, cv_scores = \
+        LP_5perc.train_test(model, optimize_model=True)
 
     print('-- PAM50 case labels after M-cut & 5th percentile strategy:')
     print_all_scores(y_test_5perc, predictions_5perc, prob_predictions_5perc, 
                     y_test_orig, y_test_pam50, 
                     txt_file_name=os.path.join(results_path,'LP_' + model_name + '_mcut_5perc.txt'))
+    
+    with open(os.path.join(results_path, 'LP_' + model_name + '_mcut_5perc_predictions.pkl')) as f:
+        pickle.dump(predictions_5perc, f)
+    with open(os.path.join(results_path, 'LP_' + model_name + '_mcut_5perc_prob_predictions.pkl')) as f:
+        pickle.dump(predictions_5perc, f)
+    with open(os.path.join(results_path, 'LP_' + model_name + '_mcut_5perc_bestmodel.pkl'), 'wb') as f:
+        pickle.dump(best_model, f)
+    with open(os.path.join(results_path, 'LP_' + model_name + '_mcut_5perc_bestparams.pkl'), 'wb') as f:
+        pickle.dump(best_params, f)
+    with open(os.path.join(results_path, 'LP_' + model_name + '_mcut_5perc_cv_scores.json'), "w") as f:
+        json.dump(cv_scores, f)
 
-    LP_10perc = MultiLabel_PowerSet(
-        X_train=X_train_scaled_selected,
-        X_test=X_test_scaled_selected,
-        y_train=y_train_10perc, 
-        y_test=y_test_10perc)
-    predictions_10perc, prob_predictions_10perc = LP_10perc.train_test(model, optimize_model=True)
+    # LP_10perc = MultiLabel_PowerSet(
+    #     X_train=X_train_scaled_selected,
+    #     X_test=X_test_scaled_selected,
+    #     y_train=y_train_10perc, 
+    #     y_test=y_test_10perc)
+    # predictions_10perc, prob_predictions_10perc = LP_10perc.train_test(model, optimize_model=True)
 
-    print('-- PAM50 case labels after M-cut & 10th percentile strategy:')
-    print_all_scores(y_test_10perc, predictions_10perc, prob_predictions_10perc, 
-                    y_test_orig, y_test_pam50, 
-                    txt_file_name=os.path.join(results_path,'LP_' + model_name + '_mcut_10perc.txt'))
+    # print('-- PAM50 case labels after M-cut & 10th percentile strategy:')
+    # print_all_scores(y_test_10perc, predictions_10perc, prob_predictions_10perc, 
+    #                 y_test_orig, y_test_pam50, 
+    #                 txt_file_name=os.path.join(results_path,'LP_' + model_name + '_mcut_10perc.txt'))
 
     # LP_25perc = MultiLabel_PowerSet(
     #     X_train=X_train_scaled_selected,
@@ -340,18 +376,18 @@ print('------------- ALGORITHM ADAPTATION -------------')
 if ALGO_ADAPT['MLARAM']:
     print('------------- MLARAM ------------')
 
-    AA_kNN_mcut = MultiLabel_Adapted(
-        X_train=X_train_scaled_selected,
-        X_test=X_test_scaled_selected,
-        y_train=y_train_mcut, 
-        y_test=y_test_mcut)
-    predictions_mcut, prob_predictions_mcut = AA_kNN_mcut.train_test(
-        type='MLARAM', optimize=True)
+    # AA_kNN_mcut = MultiLabel_Adapted(
+    #     X_train=X_train_scaled_selected,
+    #     X_test=X_test_scaled_selected,
+    #     y_train=y_train_mcut, 
+    #     y_test=y_test_mcut)
+    # predictions_mcut, prob_predictions_mcut = AA_kNN_mcut.train_test(
+    #     type='MLARAM', optimize=True)
 
-    print('-- PAM50 case labels after M-cut strategy:')
-    print_all_scores(y_test_mcut, predictions_mcut, prob_predictions_mcut, 
-                    y_test_orig, y_test_pam50, 
-                    txt_file_name=os.path.join(results_path, 'MLARAM_mcut.txt'))
+    # print('-- PAM50 case labels after M-cut strategy:')
+    # print_all_scores(y_test_mcut, predictions_mcut, prob_predictions_mcut, 
+    #                 y_test_orig, y_test_pam50, 
+    #                 txt_file_name=os.path.join(results_path, 'MLARAM_mcut.txt'))
 
     AA_kNN_mcut = MultiLabel_Adapted(
         X_train=X_train_scaled_selected,
@@ -366,35 +402,40 @@ if ALGO_ADAPT['MLARAM']:
     print_all_scores(y_test_5perc, predictions_5perc, prob_predictions_5perc, 
                     y_test_orig, y_test_pam50, 
                     txt_file_name=os.path.join(results_path, 'MLARAM_5perc.txt'))
+    
+    with open(os.path.join(results_path, 'MLARAM_mcut_5perc_predictions.pkl')) as f:
+        pickle.dump(predictions_5perc, f)
+    with open(os.path.join(results_path, 'MLARAM_mcut_5perc_prob_predictions.pkl')) as f:
+        pickle.dump(predictions_5perc, f)
 
-    AA_kNN_mcut = MultiLabel_Adapted(
-        X_train=X_train_scaled_selected,
-        X_test=X_test_scaled_selected,
-        y_train=y_train_10perc, 
-        y_test=y_test_10perc)
-    predictions_10perc, prob_predictions_10perc = AA_kNN_mcut.train_test(
-        type='MLARAM', optimize=True)
+    # AA_kNN_mcut = MultiLabel_Adapted(
+    #     X_train=X_train_scaled_selected,
+    #     X_test=X_test_scaled_selected,
+    #     y_train=y_train_10perc, 
+    #     y_test=y_test_10perc)
+    # predictions_10perc, prob_predictions_10perc = AA_kNN_mcut.train_test(
+    #     type='MLARAM', optimize=True)
 
-    print('-- PAM50 case labels after M-cut & 10th percentile strategy:')
-    print_all_scores(y_test_10perc, predictions_10perc, prob_predictions_10perc, 
-                    y_test_orig, y_test_pam50, 
-                    txt_file_name=os.path.join(results_path, 'MLARAM_10perc.txt'))
+    # print('-- PAM50 case labels after M-cut & 10th percentile strategy:')
+    # print_all_scores(y_test_10perc, predictions_10perc, prob_predictions_10perc, 
+    #                 y_test_orig, y_test_pam50, 
+    #                 txt_file_name=os.path.join(results_path, 'MLARAM_10perc.txt'))
 
 if ALGO_ADAPT['MLkNN']:  
     print('------------- ML-kNN-------------')
 
-    AA_kNN_mcut = MultiLabel_Adapted(
-        X_train=X_train_scaled_selected,
-        X_test=X_test_scaled_selected,
-        y_train=y_train_mcut, 
-        y_test=y_test_mcut)
-    predictions_mcut, prob_predictions_mcut = AA_kNN_mcut.train_test(
-        type='MLkNN', optimize=True)
+    # AA_kNN_mcut = MultiLabel_Adapted(
+    #     X_train=X_train_scaled_selected,
+    #     X_test=X_test_scaled_selected,
+    #     y_train=y_train_mcut, 
+    #     y_test=y_test_mcut)
+    # predictions_mcut, prob_predictions_mcut = AA_kNN_mcut.train_test(
+    #     type='MLkNN', optimize=True)
 
-    print('-- PAM50 case labels after M-cut strategy:')
-    print_all_scores(y_test_mcut, predictions_mcut, prob_predictions_mcut, 
-                    y_test_orig, y_test_pam50, 
-                    txt_file_name=os.path.join(results_path, 'MLkNN_mcut.txt'))
+    # print('-- PAM50 case labels after M-cut strategy:')
+    # print_all_scores(y_test_mcut, predictions_mcut, prob_predictions_mcut, 
+    #                 y_test_orig, y_test_pam50, 
+    #                 txt_file_name=os.path.join(results_path, 'MLkNN_mcut.txt'))
 
     AA_kNN_mcut = MultiLabel_Adapted(
         X_train=X_train_scaled_selected,
@@ -409,19 +450,24 @@ if ALGO_ADAPT['MLkNN']:
     print_all_scores(y_test_5perc, predictions_5perc, prob_predictions_5perc, 
                     y_test_orig, y_test_pam50, 
                     txt_file_name=os.path.join(results_path, 'MLkNN_5perc.txt'))
+    
+    with open(os.path.join(results_path, 'MLkNN_mcut_5perc_predictions.pkl')) as f:
+        pickle.dump(predictions_5perc, f)
+    with open(os.path.join(results_path, 'MLkNN_mcut_5perc_prob_predictions.pkl')) as f:
+        pickle.dump(predictions_5perc, f)
 
-    AA_kNN_mcut = MultiLabel_Adapted(
-        X_train=X_train_scaled_selected,
-        X_test=X_test_scaled_selected,
-        y_train=y_train_10perc, 
-        y_test=y_test_10perc)
-    predictions_10perc, prob_predictions_10perc = AA_kNN_mcut.train_test(
-        type='MLkNN', optimize=True)
+    # AA_kNN_mcut = MultiLabel_Adapted(
+    #     X_train=X_train_scaled_selected,
+    #     X_test=X_test_scaled_selected,
+    #     y_train=y_train_10perc, 
+    #     y_test=y_test_10perc)
+    # predictions_10perc, prob_predictions_10perc = AA_kNN_mcut.train_test(
+    #     type='MLkNN', optimize=True)
 
-    print('-- PAM50 case labels after M-cut & 10th percentile strategy:')
-    print_all_scores(y_test_10perc, predictions_10perc, prob_predictions_10perc, 
-                    y_test_orig, y_test_pam50, 
-                    txt_file_name=os.path.join(results_path, 'MLkNN_10perc.txt'))
+    # print('-- PAM50 case labels after M-cut & 10th percentile strategy:')
+    # print_all_scores(y_test_10perc, predictions_10perc, prob_predictions_10perc, 
+    #                 y_test_orig, y_test_pam50, 
+    #                 txt_file_name=os.path.join(results_path, 'MLkNN_10perc.txt'))
 
 
 
@@ -432,29 +478,34 @@ print('------------- ENSEMBLE METHODS  -------------')
 if ENSEMBLE['Chain Classifiers']:
     print('------------- ENSEMBLE CHAINS -------------')
 
-    ECC_mcut = MultiLabel_EnsembleChains(
-        X_train=X_train_scaled_selected,
-        X_test=X_test_scaled_selected,
-        y_train=y_train_mcut, 
-        y_test=y_test_mcut)
-    predictions_mcut, prob_predictions_mcut = ECC_mcut.train_test(model, N=50, optimize=True)
-
-    print('-- PAM50 case labels after M-cut strategy:')
-    print_all_scores(y_test_mcut, predictions_mcut, prob_predictions_mcut, 
-                    y_test_orig, y_test_pam50, 
-                    txt_file_name=os.path.join(results_path, 'EnsembleCC_' + model_name + '_mcut.txt'))
-
-    # ECC_5perc = MultiLabel_EnsembleChains(
+    # ECC_mcut = MultiLabel_EnsembleChains(
     #     X_train=X_train_scaled_selected,
     #     X_test=X_test_scaled_selected,
-    #     y_train=y_train_5perc, 
-    #     y_test=y_test_5perc)
-    # predictions_5perc, prob_predictions_5perc = ECC_5perc.train_test(model, N=50, optimize=True)
+    #     y_train=y_train_mcut, 
+    #     y_test=y_test_mcut)
+    # predictions_mcut, prob_predictions_mcut = ECC_mcut.train_test(model, N=50, optimize=True)
 
-    # print('-- PAM50 case labels after M-cut & 5th percentile strategy:')
-    # print_all_scores(y_test_10perc, predictions_5perc, prob_predictions_5perc, 
+    # print('-- PAM50 case labels after M-cut strategy:')
+    # print_all_scores(y_test_mcut, predictions_mcut, prob_predictions_mcut, 
     #                 y_test_orig, y_test_pam50, 
-    #                 txt_file_name=os.path.join(results_path, 'EnsembleCC_' + model_name + '_5perc.txt'))
+    #                 txt_file_name=os.path.join(results_path, 'EnsembleCC_' + model_name + '_mcut.txt'))
+
+    ECC_5perc = MultiLabel_EnsembleChains(
+        X_train=X_train_scaled_selected,
+        X_test=X_test_scaled_selected,
+        y_train=y_train_5perc, 
+        y_test=y_test_5perc)
+    predictions_5perc, prob_predictions_5perc = ECC_5perc.train_test(model, N=50, optimize=True)
+
+    print('-- PAM50 case labels after M-cut & 5th percentile strategy:')
+    print_all_scores(y_test_10perc, predictions_5perc, prob_predictions_5perc, 
+                    y_test_orig, y_test_pam50, 
+                    txt_file_name=os.path.join(results_path, 'EnsembleCC_' + model_name + '_5perc.txt'))
+    
+    with open(os.path.join(results_path, 'EnsembleCC_' + model_name + '_mcut_5perc_predictions.pkl')) as f:
+        pickle.dump(predictions_5perc, f)
+    with open(os.path.join(results_path, 'EnsembleCC_' + model_name + '_mcut_5perc_prob_predictions.pkl')) as f:
+        pickle.dump(predictions_5perc, f)
 
     # ECC_10perc = MultiLabel_EnsembleChains(
     #     X_train=X_train_scaled_selected,
@@ -472,17 +523,17 @@ if ENSEMBLE['RAKEL']:
 
     print('------------- ENSEMBLE RAKEL - DISTINCT -------------')
 
-    ER_mcut = MultiLabel_EnsembleRakel(
-        X_train=X_train_scaled_selected,
-        X_test=X_test_scaled_selected,
-        y_train=y_train_mcut, 
-        y_test=y_test_mcut)
-    predictions_mcut, prob_predictions_mcut = ER_mcut.train_test(model, optimize=True, type='distinct')
+    # ER_mcut = MultiLabel_EnsembleRakel(
+    #     X_train=X_train_scaled_selected,
+    #     X_test=X_test_scaled_selected,
+    #     y_train=y_train_mcut, 
+    #     y_test=y_test_mcut)
+    # predictions_mcut, prob_predictions_mcut = ER_mcut.train_test(model, optimize=True, type='distinct')
 
-    print('-- PAM50 case labels after M-cut strategy:')
-    print_all_scores(y_test_mcut, predictions_mcut, prob_predictions_mcut, 
-                    y_test_orig, y_test_pam50, 
-                    txt_file_name=os.path.join(results_path, 'EnsembleRakel_' + model_name + '_mcut.txt'))
+    # print('-- PAM50 case labels after M-cut strategy:')
+    # print_all_scores(y_test_mcut, predictions_mcut, prob_predictions_mcut, 
+    #                 y_test_orig, y_test_pam50, 
+    #                 txt_file_name=os.path.join(results_path, 'EnsembleRakel_' + model_name + '_mcut.txt'))
 
     ER_5perc = MultiLabel_EnsembleRakel(
         X_train=X_train_scaled_selected,
@@ -494,52 +545,22 @@ if ENSEMBLE['RAKEL']:
     print('-- PAM50 case labels after M-cut & 5th percentile strategy:')
     print_all_scores(y_test_10perc, predictions_5perc, prob_predictions_5perc, 
                     y_test_orig, y_test_pam50, 
-                    txt_file_name=os.path.join(results_path, 'EnsembleRakle_' + model_name + '_5perc.txt'))
+                    txt_file_name=os.path.join(results_path, 'EnsembleRakel_' + model_name + '_5perc.txt'))
+    
+    with open(os.path.join(results_path, 'EnsembleRakel_' + model_name + '_mcut_5perc_predictions.pkl')) as f:
+        pickle.dump(predictions_5perc, f)
+    with open(os.path.join(results_path, 'EnsembleRakel_' + model_name + '_mcut_5perc_prob_predictions.pkl')) as f:
+        pickle.dump(predictions_5perc, f)
 
-    ER_10perc = MultiLabel_EnsembleRakel(
-        X_train=X_train_scaled_selected,
-        X_test=X_test_scaled_selected,
-        y_train=y_train_10perc, 
-        y_test=y_test_10perc)
-    predictions_10perc, prob_predictions_10perc = ER_10perc.train_test(model, optimize=True, type='distinct')
+    # ER_10perc = MultiLabel_EnsembleRakel(
+    #     X_train=X_train_scaled_selected,
+    #     X_test=X_test_scaled_selected,
+    #     y_train=y_train_10perc, 
+    #     y_test=y_test_10perc)
+    # predictions_10perc, prob_predictions_10perc = ER_10perc.train_test(model, optimize=True, type='distinct')
 
-    print('-- PAM50 case labels after M-cut & 10th percentile strategy:')
-    print_all_scores(y_test_10perc, predictions_10perc, prob_predictions_10perc, 
-                    y_test_orig, y_test_pam50, 
-                    txt_file_name=os.path.join(results_path, 'EnsembleRakel_' + model_name + '_10perc.txt'))
+    # print('-- PAM50 case labels after M-cut & 10th percentile strategy:')
+    # print_all_scores(y_test_10perc, predictions_10perc, prob_predictions_10perc, 
+    #                 y_test_orig, y_test_pam50, 
+    #                 txt_file_name=os.path.join(results_path, 'EnsembleRakel_' + model_name + '_10perc.txt'))
 
-
-# print('------------- ENSEMBLE RAKEL - OVERLAPPING -------------')
-
-# ER_O_orig = MultiLabel_EnsembleRakel(
-#     X_train=X_train_scaled_selected,
-#     X_test=X_test_scaled_selected,
-#     y_train=y_train_orig, 
-#     y_test=y_test_orig)
-# predictions_orig = ER_O_orig.train_test(model, type='overlapping')
-
-# ER_O_pam50 = MultiLabel_EnsembleRakel(
-#     X_train=X_train_scaled_selected,
-#     X_test=X_test_scaled_selected,
-#     y_train=y_train_pam50, 
-#     y_test=y_test_pam50)
-# predictions_pam50 = ER_O_pam50.train_test(model, type='overlapping')
-
-# ER_O_mcut = MultiLabel_EnsembleRakel(
-#     X_train=X_train_scaled_selected,
-#     X_test=X_test_scaled_selected,
-#     y_train=y_train_mcut, 
-#     y_test=y_test_mcut)
-# predictions_mcut = ER_O_mcut.train_test(model, type='overlapping')
-
-# print('Original case labels:')
-# print_all_scores(y_test_orig, predictions_orig)
-# print('PAM50 case labels:')
-# print_all_scores(y_test_pam50, predictions_pam50)
-# print('PAM50 case labels after M-cut strategy:')
-# print_all_scores(y_test_mcut, predictions_mcut)
-
-# print('\nTest relaxed accuracy (PAM50): {}'.\
-#       format(relaxed_accuracy(y_test_orig, predictions_pam50)))
-# print('\nTest relaxed accuracy (original): {}'.\
-#       format(relaxed_accuracy(y_test_pam50, predictions_pam50)))

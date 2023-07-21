@@ -130,21 +130,51 @@ class MultiLabel_BinaryRelevance(MultiLabelClassification):
                 additional_params[new_key] = value
         
             # Create the grid search object
-            grid_search = GridSearchCV(clf, param_grid=additional_params, scoring='f1_weighted', verbose=3, cv=5)
+            grid_search = GridSearchCV(clf, param_grid=additional_params, 
+                                       scoring='f1_weighted', verbose=3, 
+                                       cv=5, return_train_score=True)
 
             # Fit the grid search to the data
             grid_search.fit(self.X_train, self.y_train)
 
             # Get the best model
-            clf = grid_search.best_estimator_
-            print(grid_search.best_params_)
+            best_model = grid_search.best_estimator_
+            best_params = grid_search.best_params_
+
+            # Get cross-validation scores (averagre and std value of train/validation score)
+            validation_scores = grid_search.cv_results_['mean_test_score']
+            train_scores = grid_search.cv_results_['mean_train_score']
+
+            # Calculate the average score and standard deviation
+            avg_val_score, std_val_score = np.mean(validation_scores), np.std(validation_scores)
+            avg_train_score, std_train_score = np.mean(train_scores), np.std(train_scores)
+
+            print("Average training score:", avg_train_score)
+            print("Training score standard deviation:", std_train_score)
+
+            print("Average validation score:", avg_val_score)
+            print("Validation score standard deviation:", std_val_score)
+
+            scores = {
+                'Train': {
+                    'average': avg_train_score,
+                    'std': std_train_score,
+                },
+                'Validation': {
+                    'average': avg_val_score,
+                    'std': std_val_score,
+                }
+            }
 
             now = datetime.datetime.now().strftime("%d-%m-%Y_%H:%M:%S")
             with open('ml_best_model_lr' + now + '.pkl', 'wb') as file:
-                pickle.dump(clf, file)
+                pickle.dump(best_model, file)
+            
+            with open('best_model_cv_scores' + now + '.pkl', 'wb') as file:
+                pickle.dump(scores, file)
 
-            pred = clf.predict(self.X_test).toarray()
-            pred_prob = clf.predict_proba(self.X_test).toarray()
+            pred = best_model.predict(self.X_test).toarray()
+            pred_prob = best_model.predict_proba(self.X_test).toarray()
 
             # Put preds and prob_preds into suitable shape
             preds = pd.DataFrame(pred, columns=self.labels)
@@ -164,7 +194,7 @@ class MultiLabel_BinaryRelevance(MultiLabelClassification):
             preds = pd.DataFrame(np.transpose(preds)[0], columns=self.labels)
             prob_preds = pd.DataFrame(np.transpose(prob_preds)[0], columns=self.labels)
 
-        return preds, prob_preds
+        return preds, prob_preds, best_model, best_params, scores
 
 class MultiLabel_Chains(MultiLabelClassification):
 
@@ -188,6 +218,11 @@ class MultiLabel_Chains(MultiLabelClassification):
         # Create classifier chain 
         chain = ClassifierChain(classifier=base, order=[0, 1, 2, 3, 4])
 
+        # Define the  classifier
+        chain = Pipeline([
+            ('classifier', chain)
+        ])
+
         if optimize:
             # Define the labels
             labels = self.y_train.columns
@@ -198,7 +233,8 @@ class MultiLabel_Chains(MultiLabelClassification):
 
             # Define the parameter grid for hyperparameter tuning
             param_grid = {
-                'order': all_orders # Order in which labels are chained
+                'classifier__order': all_orders, # Order in which labels are chained
+                'classifier__classifier': [base]
                 }
             
             # Create the grid search object
@@ -222,33 +258,65 @@ class MultiLabel_Chains(MultiLabelClassification):
             elif isinstance(model, SVC):
                 model_name = 'SVC'
 
-            additional_params = {}
+            additional_params = {
+                'classifier__order': all_orders, # Order in which labels are chained
+                'classifier__classifier': [base]
+                }
             for key, value in MULTILABEL_MODEL_PARAMS[model_name].items():
-                new_key = 'classifier__' + key
+                new_key = 'classifier__classifier__' + key
                 additional_params[new_key] = value
         
             # Create the grid search object
-            grid_search = GridSearchCV(chain, param_grid=additional_params, scoring='f1_weighted', cv=5, verbose=3)
+            grid_search = GridSearchCV(chain, param_grid=additional_params, 
+                                       scoring='f1_weighted', cv=5, verbose=3,
+                                       return_train_score=True)
 
             # Fit the grid search to the data
             grid_search.fit(self.X_train, self.y_train)
 
-            # Get best model
-            chain = grid_search.best_estimator_
+            # Get the best model
+            best_model = grid_search.best_estimator_
+            best_params = grid_search.best_params_
 
-            print(grid_search.best_params_)
+            # Get cross-validation scores (averagre and std value of train/validation score)
+            validation_scores = grid_search.cv_results_['mean_test_score']
+            train_scores = grid_search.cv_results_['mean_train_score']
+
+            # Calculate the average score and standard deviation
+            avg_val_score, std_val_score = np.mean(validation_scores), np.std(validation_scores)
+            avg_train_score, std_train_score = np.mean(train_scores), np.std(train_scores)
+
+            print("Average training score:", avg_train_score)
+            print("Training score standard deviation:", std_train_score)
+
+            print("Average validation score:", avg_val_score)
+            print("Validation score standard deviation:", std_val_score)
+
+            scores = {
+                'Train': {
+                    'average': avg_train_score,
+                    'std': std_train_score,
+                },
+                'Validation': {
+                    'average': avg_val_score,
+                    'std': std_val_score,
+                }
+            }
 
             now = datetime.datetime.now().strftime("%d-%m-%Y_%H:%M:%S")
-            with open('ml_chain_best_model_lr' + now + '.pkl', 'wb') as file:
-                pickle.dump(chain, file)
+            with open('ml_best_model_lr' + now + '.pkl', 'wb') as file:
+                pickle.dump(best_model, file)
+            
+            with open('best_model_cv_scores' + now + '.pkl', 'wb') as file:
+                pickle.dump(scores, file)
 
         # Compute probability predictions and predictions
         y_pred = chain.predict(self.X_test).toarray()
+        y_pred = pd.DataFrame(y_pred, columns=self.y_test.columns, dtype='int')
         y_pred_prob = chain.predict_proba(self.X_test).toarray()
+        y_pred_prob = pd.DataFrame(y_pred_prob, columns=self.y_test.columns)
         
-        return pd.DataFrame(y_pred, columns=self.y_test.columns, dtype='int'),\
-              pd.DataFrame(y_pred_prob, columns=self.y_test.columns)
-        
+        return y_pred, y_pred_prob, best_model, best_params, scores
 
 class MultiLabel_PowerSet(MultiLabelClassification):
 
@@ -398,7 +466,7 @@ class MultiLabel_EnsembleChains(MultiLabelClassification):
 
         classifier = MultiOutputClassifier(chains)
 
-        # Define the pipeline including any preprocessing steps
+        # Define the pipeline with a classifier
         pipeline = Pipeline([
             ('classifier', classifier)
         ])
