@@ -5,7 +5,7 @@ from sklearn.multiclass import OneVsOneClassifier, OneVsRestClassifier
 from sklearn.pipeline import Pipeline
 from sklearn.multioutput import ClassifierChain as CC, MultiOutputClassifier
 from sklearn.metrics import accuracy_score, recall_score, precision_score, f1_score, \
-    average_precision_score, label_ranking_average_precision_score, label_ranking_loss
+    label_ranking_loss, make_scorer
 from tqdm import tqdm
 import pandas as pd
 import numpy as np
@@ -130,9 +130,10 @@ class MultiLabel_BinaryRelevance(MultiLabelClassification):
                 additional_params[new_key] = value
         
             # Create the grid search object
+            LabelRankLoss = make_scorer(label_ranking_loss, greater_is_better=False, needs_proba=True)
             grid_search = GridSearchCV(clf, param_grid=additional_params, 
-                                       scoring='f1_weighted', verbose=3, 
-                                       cv=5, return_train_score=True)
+                                       scoring=LabelRankLoss, verbose=3, 
+                                       cv=5, return_train_score=True) # f1_weighted
 
             # Fit the grid search to the data
             grid_search.fit(self.X_train, self.y_train)

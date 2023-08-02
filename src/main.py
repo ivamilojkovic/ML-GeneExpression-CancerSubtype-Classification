@@ -21,9 +21,10 @@ import numpy as np
 from utils import cmp_metrics, m_cut_strategy_class_assignment
 import xgboost as xgb
 import lightgbm as lgb
-from utils import log_transform, plot_before_after_counts, plot_pca
+from utils import log_transform, plot_before_after_counts, plot_pca, NumpyEncoder
 from sklearn.decomposition import PCA
 from config_model import *
+import json, codecs
 
 plt.style.use('ggplot')
 plt.rcParams.update({'font.size': 12})
@@ -51,12 +52,20 @@ cs.store(name='project_config', node=ProjectConfig)
 def main(cfg: ProjectConfig):
 
     # Loading the dataset
-    with open(cfg.paths.dataset, 'rb') as file:
-        dataset = pkl.load(file) 
+    if cfg.train.use_multilabel_dataset:
+        with open(cfg.paths.ml_dataset, 'rb') as file:
+            dataset = pkl.load(file) 
+        X = dataset.drop(columns=['expert_PAM50_subtype', 'tcga_id',
+                           'Subtype-from Parker centroids',	'MaxCorr',
+                            'Basal', 'Her2', 'LumA', 'LumB', 'Normal'], inplace=False)
+        y = dataset['Subtype-from Parker centroids']
+    else:
+        with open(cfg.paths.dataset, 'rb') as file:
+            dataset = pkl.load(file) 
 
-    X = dataset.drop(columns=['expert_PAM50_subtype', 'tcga_id', \
-                            'sample_id', 'cancer_type'], inplace=False)
-    y = dataset.expert_PAM50_subtype
+        X = dataset.drop(columns=['expert_PAM50_subtype', 'tcga_id', \
+                                'sample_id', 'cancer_type'], inplace=False)
+        y = dataset.expert_PAM50_subtype
 
     # Remove extreme values (genes, samples) from initial preprocessing
     X, potential_samples_to_remove, \
@@ -342,8 +351,7 @@ def main(cfg: ProjectConfig):
     #                'SVC', 'Random Forest', 'XGBoost', 
     #                'LightGBM', 'AdaBoost']
 
-    MODEL_TYPES = ['SVC', 'Random Forest', 'XGBoost', 
-                   'LightGBM', 'AdaBoost']
+    MODEL_TYPES = ['Random Forest', 'XGBoost', 'Logistic Regression']
 
     for MODEL_TYPE in MODEL_TYPES:
 
@@ -497,9 +505,12 @@ def main(cfg: ProjectConfig):
             model = gs.best_estimator_
             best_params = gs.best_params_
             experiment_params['model_params'] = best_params
-            with open(os.path.join(cfg.paths.model, 'bestmodel_' + experiment_name + '.pkl'), 'wb') as file:
-                pickle.dump(model, file)
 
+            # Save the best model
+            best_model_filename = 'bestmodel_' + MODEL_TYPE.replace(' ', '') + '_' + experiment_name + '.pkl'
+            with open(os.path.join(cfg.paths.single_label_model, best_model_filename), 'wb') as file:
+                pickle.dump(model, file)
+            
             # ---------- Track model ---------------
             mlflow.sklearn.log_model(model, "best_model")
             
@@ -558,6 +569,12 @@ def main(cfg: ProjectConfig):
             experiment_params['Test results'] = test_metrics
             experiment_params['Train results'] = train_metrics
 
+            # Save experiment params as .json file
+            exp_params_filename = 'exp_params_' + MODEL_TYPE.replace(' ', '') + '_' + experiment_name + '.json'
+            json_file = json.dumps(experiment_params, cls=NumpyEncoder)
+            with open(exp_params_filename, "w") as file:
+                json.dump(json_file, file)
+
             ax = plt.figure()
             df_lr = pd.DataFrame({'Precision': test_metrics['Precision per class'],
                             'Recall': test_metrics['Recall per class'],
@@ -572,9 +589,9 @@ def main(cfg: ProjectConfig):
             mlflow.log_metric("recall_weighted_average", test_metrics['Recall weighted'])
             mlflow.log_metric("f1_score_weighted_average", test_metrics['F1 score weighted'])
 
-            mlflow.log_metric("precision_macro_average", test_metrics['Precision unweighted'])
-            mlflow.log_metric("recall_macro_average", test_metrics['Recall unweighted'])
-            mlflow.log_metric("f1_score_macro_average", test_metrics['F1 score unweighted'])
+            mlflow.log_metric("precision_macro_average", test_metrics['Precision macro'])
+            mlflow.log_metric("recall_macro_average", test_metrics['Recall macro'])
+            mlflow.log_metric("f1_score_macro_average", test_metrics['F1 score macro'])
 
             mlflow.log_metric("mcc", test_metrics['MCC'])
             #mlflow.log_metric("ROC AUC", test_metrics['ROC_AUC'])

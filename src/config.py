@@ -3,6 +3,7 @@ from dataclasses import dataclass
 @dataclass
 class Paths:
     dataset: str
+    ml_dataset: str
     experiment: str
     model: str
     images: str
@@ -23,6 +24,7 @@ class Train:
     num_folds: int
     num_feat: int
     type_feat_selection: str
+    use_multilabel_dataset: bool
 
 @dataclass
 class ProjectConfig:

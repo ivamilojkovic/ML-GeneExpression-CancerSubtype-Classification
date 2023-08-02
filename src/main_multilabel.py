@@ -39,7 +39,11 @@ with open('data/dataset_multilabel.pkl', 'rb') as file:
     # M-cut strategy to assign labels on whole dataset
     y_mcut_labels = m_cut_strategy_class_assignment(y_corr, non_neg_values=True)
     y_mcut_labels_neg = m_cut_strategy_class_assignment(y_corr, non_neg_values=False)
-    
+
+    # Assign rank based on the value of the membership/correlation
+    y_ranked_labels = y_corr.apply(rank_indices, axis=1) - 1
+    y_ranked_labels = pd.DataFrame(y_ranked_labels.values.tolist(), columns=y_corr.columns, index=y_corr.index)
+
     # Compare class distributions for original and two cases with m-cut
     plot_class_distribution_comparison(data, y_mcut_labels, y_mcut_labels_neg)
 
@@ -96,9 +100,11 @@ with open('data/dataset_multilabel.pkl', 'rb') as file:
     y_train_orig, y_test_orig, \
     y_train_5perc, y_test_5perc, \
     y_train_10perc, y_test_10perc, \
-    y_train_25perc, y_test_25perc = \
+    y_train_25perc, y_test_25perc, \
+    y_train_ranked, y_test_ranked = \
         train_test_split(X, y_pam50, y_mcut_labels, y_orig, 
                             y_mcut_5perc_labels, y_mcut_10perc_labels, y_mcut_25perc_labels,
+                            y_ranked_labels,
                             test_size=0.3, random_state=1, stratify=y_pam50)
 
     # Data standardization | normalization
@@ -141,7 +147,7 @@ best_model_name = 'bestmodel_' + 'run_08-05-2023_10:32:03.pkl'
 # best_model_name = 'bestmodel_' + 'run_21-06-2023_20:22:21.pkl'
 # best_model_name = 'bestmodel_' + 'run_21-06-2023_21:42:11.pkl'
 
-with open(os.path.join('models', best_model_name), 'rb') as file:
+with open(os.path.join('models/multi-label_models', best_model_name), 'rb') as file:
     model = pickle.load(file)
 
 if isinstance(model, LogisticRegression):
@@ -156,8 +162,8 @@ elif isinstance(model, SVC):
 ################################ TRAIN & TEST ####################################
 
 PROBLEM_TRANSF = {
-    'Binary Relevance': False,
-    'Chain Classifier': True,
+    'Binary Relevance': True,
+    'Chain Classifier': False,
     'Label Powerset': False
 }
 
@@ -189,29 +195,37 @@ if PROBLEM_TRANSF['Binary Relevance']:
     #                 y_test_orig, y_test_pam50, 
     #                 txt_file_name=os.path.join(results_path, 'BR_' + model_name + '_mcut.txt'))
 
-    BR_5perc = MultiLabel_BinaryRelevance(
+    BR_rank = MultiLabel_BinaryRelevance(
         X_train=X_train_scaled_selected,
         X_test=X_test_scaled_selected,
-        y_train=y_train_5perc, 
-        y_test=y_test_5perc)
-    predictions_5perc, prob_predictions_5perc, best_model, best_params, cv_scores = \
-        BR_5perc.train_test(model, optimize_model=True)
+        y_train=y_train_ranked, 
+        y_test=y_test_ranked)
+    predictions_rank, prob_predictions_rank, best_model, best_params, cv_scores = \
+        BR_rank.train_test(model, optimize_model=True)
 
-    print('-- PAM50 case labels after M-cut and 5th percentile strategy:')
-    print_all_scores(y_test_5perc, predictions_5perc, prob_predictions_5perc, 
-                    y_test_orig, y_test_pam50, 
-                    txt_file_name=os.path.join(results_path, 'BR_' + model_name + '_mcut_5perc.txt'))
+    # BR_5perc = MultiLabel_BinaryRelevance(
+    #     X_train=X_train_scaled_selected,
+    #     X_test=X_test_scaled_selected,
+    #     y_train=y_train_5perc, 
+    #     y_test=y_test_5perc)
+    # predictions_5perc, prob_predictions_5perc, best_model, best_params, cv_scores = \
+    #     BR_5perc.train_test(model, optimize_model=True)
+
+    # print('-- PAM50 case labels after M-cut and 5th percentile strategy:')
+    # print_all_scores(y_test_5perc, predictions_5perc, prob_predictions_5perc, 
+    #                 y_test_orig, y_test_pam50, 
+    #                 txt_file_name=os.path.join(results_path, 'BR_' + model_name + '_mcut_5perc.txt'))
     
-    with open(os.path.join(results_path, 'BR_' + model_name + '_mcut_5perc_predictions.pkl'), 'wb') as f:
-        pickle.dump(predictions_5perc, f)
-    with open(os.path.join(results_path, 'BR_' + model_name + '_mcut_5perc_prob_predictions.pkl'), 'wb') as f:
-        pickle.dump(predictions_5perc, f)
-    with open(os.path.join(results_path, 'BR_' + model_name + '_mcut_5perc_bestmodel.pkl'), 'wb') as f:
-        pickle.dump(best_model, f)
-    with open(os.path.join(results_path, 'BR_' + model_name + '_mcut_5perc_bestparams.pkl'), 'wb') as f:
-        pickle.dump(best_params, f)
-    with open(os.path.join(results_path, 'BR_' + model_name + '_mcut_5perc_cv_scores.json'), "w") as f:
-        json.dump(cv_scores, f)
+    # with open(os.path.join(results_path, 'BR_' + model_name + '_mcut_5perc_predictions.pkl'), 'wb') as f:
+    #     pickle.dump(predictions_5perc, f)
+    # with open(os.path.join(results_path, 'BR_' + model_name + '_mcut_5perc_prob_predictions.pkl'), 'wb') as f:
+    #     pickle.dump(predictions_5perc, f)
+    # with open(os.path.join(results_path, 'BR_' + model_name + '_mcut_5perc_bestmodel.pkl'), 'wb') as f:
+    #     pickle.dump(best_model, f)
+    # with open(os.path.join(results_path, 'BR_' + model_name + '_mcut_5perc_bestparams.pkl'), 'wb') as f:
+    #     pickle.dump(best_params, f)
+    # with open(os.path.join(results_path, 'BR_' + model_name + '_mcut_5perc_cv_scores.json'), "w") as f:
+    #     json.dump(cv_scores, f)
 
     # BR_10perc = MultiLabel_BinaryRelevance(
     #     X_train=X_train_scaled_selected,

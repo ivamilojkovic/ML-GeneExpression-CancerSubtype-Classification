@@ -9,6 +9,7 @@ from deeplearn_models import *
 import pandas as pd
 from sklearn.linear_model import LassoCV
 import seaborn as sns
+import json
 
 
 plt.rcParams.update({'font.size': 12})
@@ -55,8 +56,10 @@ def m_cut_strategy_class_assignment(orig_data, non_neg_values=False):
         assigned_labels.append(new_row)
 
     return pd.DataFrame(assigned_labels, columns=data.columns)
-        
 
+def rank_indices(row):
+    return row.rank(ascending=False).astype(int)
+        
 def plot_class_distribution_comparison(data, y_mcut_labels, y_5perc_labels, 
                                        y_10perc_labels=None, y_25perc_labels=None):
 
@@ -387,7 +390,7 @@ def check_dim(model, x_check=None):
         if model(x_check).shape==torch.Size([1,5]):
             print('Model is well defined!')
 
-def cmp_metrics(pred, y_test):
+def cmp_metrics(pred, y_test) -> dict:
 
     metrics = {}
 
@@ -426,9 +429,9 @@ def cmp_metrics(pred, y_test):
     precision = precision_score(pred, y_test, average='macro')
     recall = recall_score(pred, y_test, average='macro')
     f1 = f1_score(pred, y_test, average='macro')
-    metrics['Precision unweighted'] = precision
-    metrics['Recall unweighted'] = recall
-    metrics['F1 score unweighted'] = f1
+    metrics['Precision macro'] = precision
+    metrics['Recall macro'] = recall
+    metrics['F1 score macro'] = f1
 
     print('Scores (macro) on the test set:\n ')
     print('Precision: {}\nRecall: {}\nF1 score: {}'.format(precision, recall, f1))
@@ -605,4 +608,10 @@ def plot_pca(df_pca, labels_assigned, new_samples, dim=2):
 
     labels = ['Basal', 'Her2', 'Her2 - new','LumA', 'LumB',  'Normal', 'Normal - new']
     plt.legend(labels, loc="upper left", ncol=len(labels), fontsize=6)
+
+class NumpyEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return json.JSONEncoder.default(self, obj)
 
