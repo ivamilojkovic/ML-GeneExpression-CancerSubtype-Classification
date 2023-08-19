@@ -2,7 +2,7 @@ import pandas as pd
 from sklearn.utils import resample
 #from imblearn.over_sampling import SMOTE 
 
-def remove_extreme(X: pd.DataFrame, change_X = True):
+def remove_extreme(X: pd.DataFrame, change_X: bool=True):
     """
         Removes extreme genes and finds potential samples to be removed!
     """

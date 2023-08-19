@@ -1,7 +1,7 @@
-from sklearn.metrics import accuracy_score, f1_score, precision_score, roc_auc_score, \
-    recall_score, matthews_corrcoef, hamming_loss, \
-    label_ranking_average_precision_score, average_precision_score
+from sklearn.metrics import accuracy_score, f1_score, precision_score, \
+    recall_score, hamming_loss, label_ranking_average_precision_score, average_precision_score
 import numpy as np
+from utils import rank_indices
 
 def relaxed_accuracy(y_true, y_pred):
 
@@ -94,6 +94,37 @@ def partial_f1_score(y_true, y_pred):
 
     return correct_instances / num_instances
 
+def ordered_subset_accuracy(y_test_mcut, predictions, y_test_corr, prob_predictions):
+
+    # Use y_test_corr and prediction probabilities to compute ranks
+    ranked_corr = y_test_corr.apply(rank_indices, axis=1)
+    ranked_probs = prob_predictions.apply(rank_indices, axis=1)
+
+    # Now multiply by mcut labels only the ranked correlations and 
+    # by predictions the ranked probabilties
+    ranked_corr *= y_test_mcut
+    ranked_probs *= predictions
+
+    cnt_exact_ovelaps = ((ranked_probs == ranked_corr).sum(axis=1) == 5).sum()
+    return cnt_exact_ovelaps / y_test_mcut.shape[0]
+
+def k_orders_subset_accuracy(y_test_mcut, predictions, y_test_corr, prob_predictions, k=1):
+
+    # Use y_test_corr and prediction probabilities to compute ranks
+    ranked_corr = y_test_corr.apply(rank_indices, axis=1)
+    ranked_probs = prob_predictions.apply(rank_indices, axis=1)
+
+    # Now multiply by mcut labels only the ranked correlations and 
+    # by predictions the ranked probabilties
+    ranked_corr *= y_test_mcut
+    ranked_probs *= predictions
+
+    # Set zero where value > k
+    ranked_corr_below_k = ranked_corr.applymap(lambda x: 0 if x > k else x)
+    ranked_probs_below_k = ranked_probs.applymap(lambda x: 0 if x > k else x)
+    cnt_correct_first_k_positions = (ranked_corr_below_k == ranked_probs_below_k).all(axis=1).sum()
+
+    return cnt_correct_first_k_positions / y_test_mcut.shape[0]
 
 def print_all_scores(y_test, predictions, prob_predictions, label_orig, label_pam50, txt_file_name):
 

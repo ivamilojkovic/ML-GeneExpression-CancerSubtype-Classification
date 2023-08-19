@@ -15,6 +15,9 @@ import json
 plt.rcParams.update({'font.size': 12})
 matplotlib.rcParams['xtick.labelsize'] = 12
 
+def log_transform(x):
+    return np.log2(x + 0.1)
+
 def discard_negative_correlations(old_dataset):
 
     """ Set all negative correlation values to zero.
@@ -30,7 +33,9 @@ def discard_negative_correlations(old_dataset):
 
     return dataset
 
-def m_cut_strategy_class_assignment(orig_data, non_neg_values=False):
+def m_cut_strategy_class_assignment(
+        orig_data: pd.DataFrame, 
+        non_neg_values: bool=False):
 
     """ Given the predicted probabilities from the classifier or correlations, 
         the M-cut strategy is performed to assign each sample one or more labels.
@@ -42,6 +47,7 @@ def m_cut_strategy_class_assignment(orig_data, non_neg_values=False):
         data = orig_data
 
     assigned_labels = []
+    threshs = []
 
     for row in range(data.shape[0]):
         sample = data.iloc[row, :]
@@ -52,10 +58,11 @@ def m_cut_strategy_class_assignment(orig_data, non_neg_values=False):
         max_diff_idx = np.argmax(prob_diff)
         
         m_cut_thresh = (sample_sorted[max_diff_idx] + sample_sorted[max_diff_idx+1])/2
+        threshs.append(m_cut_thresh)
         new_row = (sample>m_cut_thresh).astype(int)
         assigned_labels.append(new_row)
 
-    return pd.DataFrame(assigned_labels, columns=data.columns)
+    return pd.DataFrame(assigned_labels, columns=data.columns), threshs
 
 def rank_indices(row):
     return row.rank(ascending=False).astype(int)
@@ -376,9 +383,6 @@ def create_mcut_nth_percentile_labels(
         m_cut_labels_2.loc[indices, label] = 0
 
     return m_cut_labels_2
-
-def log_transform(x):
-    return np.log2(x + 0.1)
 
 def check_dim(model, x_check=None):
     # Check model dimensions

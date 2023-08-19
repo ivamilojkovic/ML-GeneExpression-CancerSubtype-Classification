@@ -9,8 +9,10 @@ import matplotlib.pyplot as plt
 import matplotlib
 from utils import *
 from multilabel_metrics import *
-import mlflow
 import json
+
+# Ignore warnings
+import warnings
 
 # Set parameters
 plt.style.use('ggplot')
@@ -22,23 +24,35 @@ if not os.path.exists(exp_name):
     results_path = 'results/' + exp_name
     os.mkdir(results_path) 
 
+DATA_TYPE = 'CRIS'
+
 ########################### Load the data ###########################
+if DATA_TYPE == 'CRIS':
+    label_values = ['CRIS.A', 'CRIS.B', 'CRIS.C', 'CRIS.D', 'CRIS.E']
+    with open('../data/', 'rb') as file:
+        dataset = pickle.load(file) 
+    X = dataset.drop(columns=['Patient ID', 'Subtype'] + label_values, inplace=False)
+    y = dataset.Subtype
 
-with open('data/dataset_multilabel.pkl', 'rb') as file:
-    data = pickle.load(file)
-    X = data.drop(columns=['expert_PAM50_subtype', 'tcga_id',
-                           'Subtype-from Parker centroids',	'MaxCorr',
-                            'Basal', 'Her2', 'LumA', 'LumB', 'Normal'], inplace=False)
-    y_orig = data.expert_PAM50_subtype
-    y_pam50 = data['Subtype-from Parker centroids']
+elif DATA_TYPE == 'BRCA':
+    with open('..data/dataset_multilabel.pkl', 'rb') as file:
+        data = pickle.load(file)
+        label_values = ['Basal', 'Her2', 'LumA', 'LumB', 'Normal']
+        X = data.drop(columns=[
+            'expert_PAM50_subtype', 'tcga_id',
+            'Subtype-from Parker centroids', 
+            'MaxCorr'] + label_values, inplace=False)
+        y_orig = data.expert_PAM50_subtype
+        y_pam50 = data['Subtype-from Parker centroids']
 
-    # Take labels on whole dataset for PAM50
-    y_corr = data[['Basal', 'Her2', 'LumA', 'LumB',	'Normal']]
+    # Get the memberships/correlations and set negative ones to zero
+    y_corr = data[label_values]
     y_corr_non_neg = discard_negative_correlations(y_corr)
 
-    # M-cut strategy to assign labels on whole dataset
-    y_mcut_labels = m_cut_strategy_class_assignment(y_corr, non_neg_values=True)
-    y_mcut_labels_neg = m_cut_strategy_class_assignment(y_corr, non_neg_values=False)
+    # M-cut strategy to assign labels (1 or 0) to each class
+    y_mcut_labels, mcut_threshs = m_cut_strategy_class_assignment(y_corr, non_neg_values=True)
+    y_mcut_labels_neg, _ = m_cut_strategy_class_assignment(y_corr, non_neg_values=False)
+    print('M-cut average and std threshold value: ', np.mean(mcut_threshs), np.std(mcut_threshs))
 
     # Assign rank based on the value of the membership/correlation
     y_ranked_labels = y_corr.apply(rank_indices, axis=1) - 1
@@ -72,8 +86,6 @@ with open('data/dataset_multilabel.pkl', 'rb') as file:
         N=25
     )
 
-    # TODO: Save all label variations
-
     # Check the number of misclassified 
     misclass_samples_idx = y_orig[y_pam50!=y_orig].index
     print('Number of missclassified samples compared to original labels: ', 
@@ -101,11 +113,15 @@ with open('data/dataset_multilabel.pkl', 'rb') as file:
     y_train_5perc, y_test_5perc, \
     y_train_10perc, y_test_10perc, \
     y_train_25perc, y_test_25perc, \
-    y_train_ranked, y_test_ranked = \
-        train_test_split(X, y_pam50, y_mcut_labels, y_orig, 
-                            y_mcut_5perc_labels, y_mcut_10perc_labels, y_mcut_25perc_labels,
-                            y_ranked_labels,
-                            test_size=0.3, random_state=1, stratify=y_pam50)
+    y_train_ranked, y_test_ranked, \
+    y_train_corr, y_test_corr = \
+        train_test_split(X, y_pam50, 
+                         y_mcut_labels, y_orig, 
+                         y_mcut_5perc_labels, 
+                         y_mcut_10perc_labels, 
+                         y_mcut_25perc_labels,
+                         y_ranked_labels, y_corr,
+                         test_size=0.3, random_state=1, stratify=y_pam50)
 
     # Data standardization | normalization
     X_train = X_train.divide(X_train.sum(axis=1), axis=0) * 1e6
@@ -195,37 +211,50 @@ if PROBLEM_TRANSF['Binary Relevance']:
     #                 y_test_orig, y_test_pam50, 
     #                 txt_file_name=os.path.join(results_path, 'BR_' + model_name + '_mcut.txt'))
 
-    BR_rank = MultiLabel_BinaryRelevance(
-        X_train=X_train_scaled_selected,
-        X_test=X_test_scaled_selected,
-        y_train=y_train_ranked, 
-        y_test=y_test_ranked)
-    predictions_rank, prob_predictions_rank, best_model, best_params, cv_scores = \
-        BR_rank.train_test(model, optimize_model=True)
-
-    # BR_5perc = MultiLabel_BinaryRelevance(
+    # BR_rank = MultiLabel_BinaryRelevance(
     #     X_train=X_train_scaled_selected,
     #     X_test=X_test_scaled_selected,
-    #     y_train=y_train_5perc, 
-    #     y_test=y_test_5perc)
-    # predictions_5perc, prob_predictions_5perc, best_model, best_params, cv_scores = \
-    #     BR_5perc.train_test(model, optimize_model=True)
+    #     y_train=y_train_ranked, 
+    #     y_test=y_test_ranked)
+    # predictions_rank, prob_predictions_rank, best_model, best_params, cv_scores = \
+    #     BR_rank.train_test(model, optimize_model=True)
 
-    # print('-- PAM50 case labels after M-cut and 5th percentile strategy:')
-    # print_all_scores(y_test_5perc, predictions_5perc, prob_predictions_5perc, 
-    #                 y_test_orig, y_test_pam50, 
-    #                 txt_file_name=os.path.join(results_path, 'BR_' + model_name + '_mcut_5perc.txt'))
+    BR_5perc = MultiLabel_BinaryRelevance(
+        X_train=X_train_scaled_selected,
+        X_test=X_test_scaled_selected,
+        y_train=y_train_5perc, 
+        y_test=y_test_5perc)
+    predictions_5perc, prob_predictions_5perc, best_model, best_params, cv_scores = \
+        BR_5perc.train_test(model, optimize_model=True)
+
+    print('-- PAM50 case labels after M-cut and 5th percentile strategy:')
+    print_all_scores(y_test_5perc, predictions_5perc, prob_predictions_5perc, 
+                    y_test_orig, y_test_pam50, 
+                    txt_file_name=os.path.join(results_path, 'BR_' + model_name + '_mcut_5perc.txt'))
     
-    # with open(os.path.join(results_path, 'BR_' + model_name + '_mcut_5perc_predictions.pkl'), 'wb') as f:
-    #     pickle.dump(predictions_5perc, f)
-    # with open(os.path.join(results_path, 'BR_' + model_name + '_mcut_5perc_prob_predictions.pkl'), 'wb') as f:
-    #     pickle.dump(predictions_5perc, f)
-    # with open(os.path.join(results_path, 'BR_' + model_name + '_mcut_5perc_bestmodel.pkl'), 'wb') as f:
-    #     pickle.dump(best_model, f)
-    # with open(os.path.join(results_path, 'BR_' + model_name + '_mcut_5perc_bestparams.pkl'), 'wb') as f:
-    #     pickle.dump(best_params, f)
-    # with open(os.path.join(results_path, 'BR_' + model_name + '_mcut_5perc_cv_scores.json'), "w") as f:
-    #     json.dump(cv_scores, f)
+    print('Ordered subset accuracy: ', ordered_subset_accuracy(
+        y_test_mcut=y_test_5perc, predictions=predictions_5perc, 
+        y_test_corr=y_test_corr, prob_predictions=prob_predictions_5perc))
+    print('Subset accuracy for orders below k=1: ', k_orders_subset_accuracy(
+        y_test_mcut=y_test_5perc, predictions=predictions_5perc, 
+        y_test_corr=y_test_corr, prob_predictions=prob_predictions_5perc, k=1))
+    print('Subset accuracy for orders below k=2: ', k_orders_subset_accuracy(
+        y_test_mcut=y_test_5perc, predictions=predictions_5perc, 
+        y_test_corr=y_test_corr, prob_predictions=prob_predictions_5perc, k=2))
+    print('Subset accuracy for orders below k=3: ', k_orders_subset_accuracy(
+        y_test_mcut=y_test_5perc, predictions=predictions_5perc, 
+        y_test_corr=y_test_corr, prob_predictions=prob_predictions_5perc, k=3))
+    
+    with open(os.path.join(results_path, 'BR_' + model_name + '_mcut_5perc_predictions.pkl'), 'wb') as f:
+        pickle.dump(predictions_5perc, f)
+    with open(os.path.join(results_path, 'BR_' + model_name + '_mcut_5perc_prob_predictions.pkl'), 'wb') as f:
+        pickle.dump(predictions_5perc, f)
+    with open(os.path.join(results_path, 'BR_' + model_name + '_mcut_5perc_bestmodel.pkl'), 'wb') as f:
+        pickle.dump(best_model, f)
+    with open(os.path.join(results_path, 'BR_' + model_name + '_mcut_5perc_bestparams.pkl'), 'wb') as f:
+        pickle.dump(best_params, f)
+    with open(os.path.join(results_path, 'BR_' + model_name + '_mcut_5perc_cv_scores.json'), "w") as f:
+        json.dump(cv_scores, f)
 
     # BR_10perc = MultiLabel_BinaryRelevance(
     #     X_train=X_train_scaled_selected,
@@ -281,6 +310,8 @@ if PROBLEM_TRANSF['Chain Classifier']:
     print_all_scores(y_test_5perc, predictions_5perc, prob_predictions_5perc, 
                     y_test_orig, y_test_pam50, 
                     txt_file_name=os.path.join(results_path,'CC_' + model_name + '_mcut_5perc.txt'))
+    
+
     
     with open(os.path.join(results_path, 'CC_' + model_name + '_mcut_5perc_predictions.pkl')) as f:
         pickle.dump(predictions_5perc, f)
@@ -346,6 +377,8 @@ if PROBLEM_TRANSF['Label Powerset']:
     print_all_scores(y_test_5perc, predictions_5perc, prob_predictions_5perc, 
                     y_test_orig, y_test_pam50, 
                     txt_file_name=os.path.join(results_path,'LP_' + model_name + '_mcut_5perc.txt'))
+    
+    
     
     with open(os.path.join(results_path, 'LP_' + model_name + '_mcut_5perc_predictions.pkl')) as f:
         pickle.dump(predictions_5perc, f)

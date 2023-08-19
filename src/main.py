@@ -1,5 +1,5 @@
 from sklearn.preprocessing import LabelEncoder, FunctionTransformer
-from sklearn.metrics import confusion_matrix
+from sklearn.metrics import confusion_matrix, make_scorer
 from sklearn.model_selection import train_test_split, cross_val_score, GridSearchCV, KFold
 from sklearn.neural_network import MLPClassifier
 from sklearn.linear_model import LogisticRegression, Lasso
@@ -25,6 +25,7 @@ from utils import log_transform, plot_before_after_counts, plot_pca, NumpyEncode
 from sklearn.decomposition import PCA
 from config_model import *
 import json, codecs
+from singlelabel_metrics import *
 
 plt.style.use('ggplot')
 plt.rcParams.update({'font.size': 12})
@@ -52,21 +53,29 @@ cs.store(name='project_config', node=ProjectConfig)
 def main(cfg: ProjectConfig):
 
     # Loading the dataset
-    if cfg.train.use_multilabel_dataset:
-        with open(cfg.paths.ml_dataset, 'rb') as file:
-            dataset = pkl.load(file) 
-        X = dataset.drop(columns=['expert_PAM50_subtype', 'tcga_id',
-                           'Subtype-from Parker centroids',	'MaxCorr',
-                            'Basal', 'Her2', 'LumA', 'LumB', 'Normal'], inplace=False)
-        y = dataset['Subtype-from Parker centroids']
-    else:
-        with open(cfg.paths.dataset, 'rb') as file:
-            dataset = pkl.load(file) 
+    if cfg.train.brca_cris == 'BRCA':
+        if cfg.train.use_multilabel_dataset:
+            with open(cfg.paths.ml_dataset, 'rb') as file:
+                dataset = pkl.load(file) 
+            X = dataset.drop(columns=['expert_PAM50_subtype', 'tcga_id',
+                            'Subtype-from Parker centroids',	'MaxCorr',
+                                'Basal', 'Her2', 'LumA', 'LumB', 'Normal'], inplace=False)
+            y = dataset['Subtype-from Parker centroids']
+        else:
+            with open(cfg.paths.dataset, 'rb') as file:
+                dataset = pkl.load(file) 
 
-        X = dataset.drop(columns=['expert_PAM50_subtype', 'tcga_id', \
-                                'sample_id', 'cancer_type'], inplace=False)
-        y = dataset.expert_PAM50_subtype
+            X = dataset.drop(columns=['expert_PAM50_subtype', 'tcga_id', \
+                                    'sample_id', 'cancer_type'], inplace=False)
+            y = dataset.expert_PAM50_subtype
 
+    elif cfg.train.brca_cris == 'CRIS':
+        label_values = ['CRIS.A', 'CRIS.B', 'CRIS.C', 'CRIS.D', 'CRIS.E']
+        with open(cfg.paths.cris_dataset, 'rb') as file:
+            dataset = pkl.load(file) 
+        X = dataset.drop(columns=['Patient ID', 'Subtype'] + label_values, inplace=False)
+        y = dataset.Subtype
+    
     # Remove extreme values (genes, samples) from initial preprocessing
     X, potential_samples_to_remove, \
         feat_to_remove, feat_to_keep = remove_extreme(X, change_X = True)
@@ -350,8 +359,8 @@ def main(cfg: ProjectConfig):
     # MODEL_TYPES = ['Logistic Regression', 'KNN', 'Decision Tree', 
     #                'SVC', 'Random Forest', 'XGBoost', 
     #                'LightGBM', 'AdaBoost']
-
-    MODEL_TYPES = ['Random Forest', 'XGBoost', 'Logistic Regression']
+    # MODEL_TYPES = ['Logistic Regression', 'SVC', 'Random Forest', 'XGBoost']
+    MODEL_TYPES = ['SVC']
 
     for MODEL_TYPE in MODEL_TYPES:
 
@@ -485,31 +494,134 @@ def main(cfg: ProjectConfig):
             scores = cross_val_score(classifier, X_train_scaled, y_train,
                                     scoring='neg_log_loss', 
                                     cv=cfg.train.num_folds, verbose=5)
-            
 
         # Save data for training and testing
         with open(os.path.join(cfg.paths.artefacts, experiment_name + '.pkl'), 'wb') as file:
             pickle.dump([X_train_scaled_selected, LB.inverse_transform(y_train),
                          X_test_scaled_selected, LB.inverse_transform(y_test)], file)
             
-        # ----------------- TRAIN & TEST ------------------
-        if cfg.train.optim:
-            # Define Grid Search
-            gs = GridSearchCV(classifier, param_grid=MODEL_PARAMS[MODEL_TYPE], 
-                            scoring=cfg.train.grid_scoring, cv=cfg.train.num_folds, 
-                            verbose=2, refit=True, n_jobs=1, return_train_score=True)
-            start = time.time()
-            gs.fit(X_train_scaled_selected.values, y_train)
-            stop = time.time()
+        plt.close('all')
 
+        # Optimize the model2         
+        if cfg.train.optim:
+            gs = GridSearchCV(
+                estimator=classifier, 
+                param_grid=MODEL_PARAMS[MODEL_TYPE], 
+                scoring=cfg.train.grid_scoring,
+                cv=KFold(n_splits=cfg.train.num_folds, shuffle=True, random_state=123), 
+                n_jobs=1, verbose=2, 
+                return_train_score=True,
+                refit=True)
+            gs.fit(X_train_scaled_selected.values, y_train)
+
+            # Get the optimal model and its parameters
             model = gs.best_estimator_
             best_params = gs.best_params_
             experiment_params['model_params'] = best_params
+
+            # Get cross-validation scores (averagre and std value of train/validation score)
+            best_idx = gs.best_index_
+            avg_val_scores, std_val_scores = gs.cv_results_['mean_test_score'][best_idx], gs.cv_results_['std_test_score'][best_idx]
+            avg_train_scores, std_train_scores = gs.cv_results_['mean_train_score'][best_idx], gs.cv_results_['std_train_score'][best_idx]
+
+            # Access the results for each fold
+            train_scores = {
+                'MCC': [],
+                'weighted_precision': [],
+                'weighted_recall': [],
+                'weighted_f1': [],
+                'macro_precision': [],
+                'macro_recall': [],
+                'macro_f1': []
+            }
+            val_scores = {
+                'MCC': [],
+                'weighted_precision': [],
+                'weighted_recall': [],
+                'weighted_f1': [],
+                'macro_precision': [],
+                'macro_recall': [],
+                'macro_f1': []
+            }
+            
+            cv_results = gs.cv_results_
+
+            # Loop through each fold and compute the desired metrics
+            for train_indices, val_indices in gs.cv.split(X_train_scaled_selected.index):
+                
+                # Predict on the train and validation sets using the best model
+                y_train_pred = model.predict(X_train_scaled_selected.iloc[train_indices, :])
+                y_train_true = y_train.iloc[train_indices]
+                y_val_pred = model.predict(X_train_scaled_selected.iloc[val_indices, :])
+                y_val_true = y_train.iloc[val_indices]
+
+                # Calculate the desired metrics for the current fold - train set
+                train_scores['weighted_precision'].append(precision_score(y_train_true, y_train_pred, average='weighted'))
+                train_scores['weighted_recall'].append(recall_score(y_train_true, y_train_pred, average='weighted'))
+                train_scores['weighted_f1'].append(f1_score(y_train_true, y_train_pred, average='weighted'))
+                train_scores['macro_precision'].append(precision_score(y_train_true, y_train_pred, average='macro'))
+                train_scores['macro_recall'].append(recall_score(y_train_true, y_train_pred, average='macro'))
+                train_scores['macro_f1'].append(f1_score(y_train_true, y_train_pred, average='macro'))
+                train_scores['MCC'].append(matthews_corrcoef(y_train_true, y_train_pred))
+
+                # Calculate the desired metrics for the current fold - validation set
+                val_scores['weighted_precision'].append(precision_score(y_val_true, y_val_pred, average='weighted'))
+                val_scores['weighted_recall'].append(recall_score(y_val_true, y_val_pred, average='weighted'))
+                val_scores['weighted_f1'].append(f1_score(y_val_true, y_val_pred, average='weighted'))
+                val_scores['macro_precision'].append(precision_score(y_val_true, y_val_pred, average='macro'))
+                val_scores['macro_recall'].append(recall_score(y_val_true, y_val_pred, average='macro'))
+                val_scores['macro_f1'].append(f1_score(y_val_true, y_val_pred, average='macro'))
+                val_scores['MCC'].append(matthews_corrcoef(y_val_true, y_val_pred))
+
+            # Calculate the mean for each list in the dictionary
+            mean_train_metrics, std_train_metrics = {}, {}
+            for key, value in train_scores.items():
+                mean_train_metrics[key] = np.mean(value)
+                std_train_metrics[key] = np.std(value)
+            mean_val_metrics, std_val_metrics = {}, {}
+            for key, value in val_scores.items():
+                mean_val_metrics[key] = np.mean(value)
+                std_val_metrics[key] = np.std(value)
+            scores = {
+                'Train': {
+                    'average': mean_train_metrics,
+                    'std': std_train_metrics,
+                },
+                'Validation': {
+                    'average': mean_val_metrics,
+                    'std': std_val_metrics,
+                }
+            }
+
+            # Only the accuracy here..
+            experiment_params['cv_avg_val_scores'] = avg_val_scores
+            experiment_params['cv_avg_train_scores'] = avg_train_scores
+            experiment_params['cv_std_val_scores'] = std_val_scores
+            experiment_params['cv_std_train_scores'] = std_train_scores
+
+            print("Average training score:", avg_train_scores)
+            print("Training score standard deviation:", std_train_scores)
+            print("Average validation score:", avg_val_scores)
+            print("Validation score standard deviation:", std_val_scores)
+
+            # Save experiment params as .json file
+            exp_params_filename = 'exp_params_' + MODEL_TYPE.replace(' ', '') + '_' + experiment_name + '.json'
+            json_file = json.dumps(experiment_params, cls=NumpyEncoder)
+            with open(exp_params_filename, "w") as file:
+                json.dump(json_file, file)
 
             # Save the best model
             best_model_filename = 'bestmodel_' + MODEL_TYPE.replace(' ', '') + '_' + experiment_name + '.pkl'
             with open(os.path.join(cfg.paths.single_label_model, best_model_filename), 'wb') as file:
                 pickle.dump(model, file)
+
+            # Save CV scores as dictionary (validation/train and mean and std values)
+            result_sl_path = os.path.join(
+                cfg.paths.result, 'single-label', 
+                'best_model_cv_scores_' + MODEL_TYPE.replace(' ', '') + '_' + experiment_name + '.json'
+            ) 
+            with open(result_sl_path, "w") as outfile:
+                json.dump(scores, outfile)
             
             # ---------- Track model ---------------
             mlflow.sklearn.log_model(model, "best_model")
@@ -520,8 +632,6 @@ def main(cfg: ProjectConfig):
             stop = time.time()
 
             experiment_params['model_params'] = MODEL_PARAMS[MODEL_TYPE]
-
-        experiment_params['training_time'] =  stop-start
         
         # --------------- Compute predictions ------------------
         pred_train = model.predict(X_train_scaled_selected.values)
@@ -561,6 +671,7 @@ def main(cfg: ProjectConfig):
             print()
 
         else:
+            # Compute the predictions 
             pred = model.predict(X_test_scaled_selected.values)
         
             # ---------------- Compute metrics ---------------------

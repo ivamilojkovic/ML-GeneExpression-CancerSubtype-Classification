@@ -2,12 +2,14 @@ from dataclasses import dataclass
 
 @dataclass
 class Paths:
-    dataset: str
+    brca_dataset: str
+    cris_dataset: str
     ml_dataset: str
     experiment: str
     model: str
     images: str
     artefacts: str
+    result: str
 
 @dataclass
 class Train:
@@ -25,6 +27,7 @@ class Train:
     num_feat: int
     type_feat_selection: str
     use_multilabel_dataset: bool
+    brca_cris: str
 
 @dataclass
 class ProjectConfig:
