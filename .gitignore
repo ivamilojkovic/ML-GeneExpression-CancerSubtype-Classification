@@ -10,6 +10,9 @@
 /outputs
 /models
 /results
+/data
+/artefacts
+
 
 # Ignore dataset
 *.pkl

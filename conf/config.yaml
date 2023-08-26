@@ -14,16 +14,23 @@ train:
   grid_scoring: 'accuracy'
   downsample_test: False
   num_folds: 10
-  num_feat: 844
+  num_feat: 500
   type_feat_selection: 'hybrid' # ['univariate', 'wrapper', 'embedded', 'hybrid']
+  use_multilabel_dataset: True
+  brca_cris: 'BRCA' 
 
 paths:
   data: ${hydra:runtime.cwd}/data
-  dataset: ${hydra:runtime.cwd}/data/tcga_brca_raw_19036_1053samples.pkl
+  brca_dataset: ${hydra:runtime.cwd}/data/tcga_brca_raw_19036_1053samples.pkl
+  cris_dataset: ${hydra:runtime.cwd}/data/tcga_cris_raw_24356_620samples.pkl
+  ml_dataset: ${hydra:runtime.cwd}/data/dataset_multilabel.pkl
   experiment: ${hydra:runtime.cwd}/experiments
   model: ${hydra:runtime.cwd}/models
+  single_label_model: ${hydra:runtime.cwd}/models/single-label_models
   images: ${hydra:runtime.cwd}/images
   artefacts: ${hydra:runtime.cwd}/artefacts
+  result: ${hydra:runtime.cwd}/results
+  figures: ${hydra:runtime.cwd}/figures
 
 
 

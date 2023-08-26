@@ -10,6 +10,7 @@ class Paths:
     images: str
     artefacts: str
     result: str
+    figures: str
 
 @dataclass
 class Train:

@@ -1,6 +1,6 @@
 from sklearn.preprocessing import LabelEncoder, FunctionTransformer
 from sklearn.metrics import confusion_matrix, make_scorer
-from sklearn.model_selection import train_test_split, cross_val_score, GridSearchCV, KFold
+from sklearn.model_selection import train_test_split, cross_val_score, GridSearchCV, KFold, StratifiedKFold
 from sklearn.neural_network import MLPClassifier
 from sklearn.linear_model import LogisticRegression, Lasso
 from sklearn.neighbors import KNeighborsClassifier
@@ -58,13 +58,12 @@ def main(cfg: ProjectConfig):
             with open(cfg.paths.ml_dataset, 'rb') as file:
                 dataset = pkl.load(file) 
             X = dataset.drop(columns=['expert_PAM50_subtype', 'tcga_id',
-                            'Subtype-from Parker centroids',	'MaxCorr',
+                            'Subtype-from Parker centroids', 'MaxCorr',
                                 'Basal', 'Her2', 'LumA', 'LumB', 'Normal'], inplace=False)
             y = dataset['Subtype-from Parker centroids']
         else:
-            with open(cfg.paths.dataset, 'rb') as file:
+            with open(cfg.paths.brca_dataset, 'rb') as file:
                 dataset = pkl.load(file) 
-
             X = dataset.drop(columns=['expert_PAM50_subtype', 'tcga_id', \
                                     'sample_id', 'cancer_type'], inplace=False)
             y = dataset.expert_PAM50_subtype
@@ -73,8 +72,8 @@ def main(cfg: ProjectConfig):
         label_values = ['CRIS.A', 'CRIS.B', 'CRIS.C', 'CRIS.D', 'CRIS.E']
         with open(cfg.paths.cris_dataset, 'rb') as file:
             dataset = pkl.load(file) 
-        X = dataset.drop(columns=['Patient ID', 'Subtype'] + label_values, inplace=False)
-        y = dataset.Subtype
+        X = dataset.drop(columns=['Patient ID', 'Subtype-from Parker centroids'] + label_values, inplace=False)
+        y = dataset['Subtype-from Parker centroids']
     
     # Remove extreme values (genes, samples) from initial preprocessing
     X, potential_samples_to_remove, \
@@ -237,7 +236,8 @@ def main(cfg: ProjectConfig):
         plot_pca(df_pca_2, LB.inverse_transform(y_train), new_train_samples.index)
         plot_pca(df_pca_3, LB.inverse_transform(y_train), new_train_samples.index, dim=3)
         
-    # Feature selection
+    # --------- Feature selection ------------
+
     if cfg.train.type_feat_selection == 'univariate':
         best_feat_model = SelectKBest(score_func=f_classif, k=cfg.train.num_feat) # k needs to be defined
         best_feat_model.fit(X_train_scaled, y_train)
@@ -255,8 +255,8 @@ def main(cfg: ProjectConfig):
         selected_feat = featureScores.sort_values(by='Score')[-cfg.train.num_feat:]['Feature']
     
     elif cfg.train.type_feat_selection == 'hybrid':
-        if not os.path.exists(os.path.join(cfg.paths.data, 'hybrid_features_800.pkl')):
-
+        hybrid_feat_selection_path = os.path.join(cfg.paths.data, 'feat_select_gt_50_perc_occur.pkl') # could be ['hybrid_features_800.pkl'...]
+        if not os.path.exists(hybrid_feat_selection_path):
             # Apply filtering method 
             filter_model = SelectKBest(score_func=f_classif, k=cfg.train.num_feat) # k needs to be defined
             filter_model.fit(X_train_scaled, y_train)
@@ -272,10 +272,11 @@ def main(cfg: ProjectConfig):
             selected_feat = X_selected.columns[selector.get_support()]
             experiment_params['n_features_selected'] = selector.n_features_
 
-            with open(os.path.join(cfg.paths.data, 'hybrid_features_800.pkl'), 'wb') as file:
+            with open(hybrid_feat_selection_path, 'wb') as file:
                 pickle.dump(selected_feat, file)
         
-        with open(os.path.join(cfg.paths.data, 'hybrid_features_800.pkl'), 'rb') as file:
+        # Load selected features
+        with open(hybrid_feat_selection_path, 'rb') as file:
             selected_feat = pickle.load(file)
 
     elif cfg.train.type_feat_selection == 'filter':
@@ -335,6 +336,7 @@ def main(cfg: ProjectConfig):
     # Check how many features from initial preprocessing overlap after main selection
     overlapped_feat = set(selected_feat).intersection(set(feat_to_keep))
     print('Number of features overlapping: {}'.format(len(overlapped_feat)))
+    print('Number of features selected: ', len(selected_feat))
 
     # Extract the data frames with only selected features
     X_train_scaled_selected = X_train_scaled[list(selected_feat)]
@@ -360,7 +362,7 @@ def main(cfg: ProjectConfig):
     #                'SVC', 'Random Forest', 'XGBoost', 
     #                'LightGBM', 'AdaBoost']
     # MODEL_TYPES = ['Logistic Regression', 'SVC', 'Random Forest', 'XGBoost']
-    MODEL_TYPES = ['SVC']
+    MODEL_TYPES = ['XGBoost']
 
     for MODEL_TYPE in MODEL_TYPES:
 
@@ -502,13 +504,13 @@ def main(cfg: ProjectConfig):
             
         plt.close('all')
 
-        # Optimize the model2         
+        #################################### FIND OPTIMAL MODEL ####################################
         if cfg.train.optim:
             gs = GridSearchCV(
                 estimator=classifier, 
                 param_grid=MODEL_PARAMS[MODEL_TYPE], 
                 scoring=cfg.train.grid_scoring,
-                cv=KFold(n_splits=cfg.train.num_folds, shuffle=True, random_state=123), 
+                cv=StratifiedKFold(n_splits=cfg.train.num_folds, shuffle=True, random_state=123), 
                 n_jobs=1, verbose=2, 
                 return_train_score=True,
                 refit=True)
@@ -547,7 +549,7 @@ def main(cfg: ProjectConfig):
             cv_results = gs.cv_results_
 
             # Loop through each fold and compute the desired metrics
-            for train_indices, val_indices in gs.cv.split(X_train_scaled_selected.index):
+            for train_indices, val_indices in gs.cv.split(X_train_scaled_selected, y_train):
                 
                 # Predict on the train and validation sets using the best model
                 y_train_pred = model.predict(X_train_scaled_selected.iloc[train_indices, :])
@@ -622,7 +624,7 @@ def main(cfg: ProjectConfig):
             ) 
             with open(result_sl_path, "w") as outfile:
                 json.dump(scores, outfile)
-            
+
             # ---------- Track model ---------------
             mlflow.sklearn.log_model(model, "best_model")
             
@@ -673,7 +675,7 @@ def main(cfg: ProjectConfig):
         else:
             # Compute the predictions 
             pred = model.predict(X_test_scaled_selected.values)
-        
+
             # ---------------- Compute metrics ---------------------
             test_metrics = cmp_metrics(pred, y_test)
             train_metrics = cmp_metrics(pred_train, y_train)
@@ -709,13 +711,15 @@ def main(cfg: ProjectConfig):
 
             # Plot confusion matrix
             conf_mat = confusion_matrix(y_test, pred) 
-            conf_mat_percentage = conf_mat / conf_mat.sum(axis=1)  
+            # conf_mat_norm = confusion_matrix(y_test, pred, normalize='true')
+            conf_mat_percentage = conf_mat / conf_mat.sum(axis=0)  
 
             class_cnts = ['{0:0.0f}'.format(value) for value in conf_mat.flatten()]
+            class_percentages = ['{0:.2%}'.format(value) for value in conf_mat_percentage.flatten()]   
+            # class_cnt_norm = ['{0:.2f}'.format(value) for value in conf_mat_norm.flatten()]
 
-            class_percentages = ['{0:.2%}'.format(value) for value in conf_mat_percentage.flatten()]    
             labels = [f'{v1}\n{v2}' for \
-                      v1, v2 in zip(class_cnts, class_percentages)]
+                        v1, v2 in zip(class_cnts, class_percentages)] # class_per
             labels = np.asarray(labels).reshape(5,5)
 
             fig = plt.figure()
@@ -723,7 +727,7 @@ def main(cfg: ProjectConfig):
             #sns.heatmap(df.div(df.values.sum()), annot=True)
             sns.heatmap(df, annot=labels, fmt='', cmap='Greens')
             if not cfg.train.solve_class_imbalance:
-                plt.title('Confusion matrix for ' + 'case-0' +' best model')
+                plt.title('Confusion matrix for ' + MODEL_TYPE + ' (best model)')
             else:
                 plt.title('Confusion matrix for ' + case_name + ' best model')
             

@@ -16,7 +16,7 @@ def remove_extreme(X: pd.DataFrame, change_X: bool=True):
     print('There are {} columns with more than 80% of Null values!'.\
           format(X_nans_80.sum()))
     
-    # 2. Check where the CMP values are lower than 4 for more than 20% of samples
+    # 2. Check where the raw count values are lower than 4 for more than 20% of samples
     X_4_keep = (X > 4).sum(axis=0)
     X_4_20_keep = (X_4_keep / cmp_X.shape[0]).gt(0.2)
     feat_to_remove = set(X.columns).difference(set(X.loc[:, X_4_20_keep].columns))

@@ -5,7 +5,6 @@ import numpy as np
 from sklearn.metrics import accuracy_score, f1_score, precision_score, roc_auc_score
 from sklearn.metrics import recall_score, matthews_corrcoef, hamming_loss
 import torch
-from deeplearn_models import *
 import pandas as pd
 from sklearn.linear_model import LassoCV
 import seaborn as sns
@@ -24,12 +23,11 @@ def discard_negative_correlations(old_dataset):
     """
 
     dataset = old_dataset.copy()
+    
+    labels = old_dataset.columns
 
-    dataset['LumA'][dataset['LumA'] < 0] = 0
-    dataset['LumB'][dataset['LumB'] < 0] = 0
-    dataset['Basal'][dataset['Basal'] < 0] = 0
-    dataset['Her2'][dataset['Her2'] < 0] = 0
-    dataset['Normal'][dataset['Normal'] < 0] = 0
+    for label in labels:
+        dataset[label][dataset[label] < 0.0] = 0.0
 
     return dataset
 
@@ -161,7 +159,7 @@ def plot_bar_counts_of_label(
 
 def plot_stacked_bars(y, y_mcut_labels, y_5perc_labels, y_10perc_labels, y_25perc_labels):
 
-    class_names = ['LumA', 'LumB', 'Basal', 'Her2', 'Normal']
+    class_names = y_mcut_labels.columns
 
     # Generate some random data for the bars
     num_bars = 5
@@ -244,7 +242,7 @@ def plot_stacked_bars(y, y_mcut_labels, y_5perc_labels, y_10perc_labels, y_25per
 
 def plot_stacked_bars_primary_secondary_label_assigned(y, y_mcut_labels, y_5perc_labels, y_10perc_labels, y_25perc_labels):
 
-    class_names = ['LumA', 'LumB', 'Basal', 'Her2', 'Normal']
+    class_names = y_mcut_labels.columns
 
     # Generate some random data for the bars
     num_bars = 5

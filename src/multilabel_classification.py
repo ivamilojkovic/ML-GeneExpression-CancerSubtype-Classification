@@ -179,7 +179,7 @@ class MultiLabel_BinaryRelevance(MultiLabelClassification):
 
             # Put preds and prob_preds into suitable shape
             preds = pd.DataFrame(pred, columns=self.labels)
-            prob_preds = pd.DataFrame(pred_prob, columns=self.labels)
+            prob_preds = pd.DataFrame(pred_prob, columns=self.labels, index=self.X_test.index)
 
         else:
             for label in self.labels:
@@ -193,7 +193,7 @@ class MultiLabel_BinaryRelevance(MultiLabelClassification):
 
             # Put preds and prob_preds into suitable shape
             preds = pd.DataFrame(np.transpose(preds)[0], columns=self.labels)
-            prob_preds = pd.DataFrame(np.transpose(prob_preds)[0], columns=self.labels)
+            prob_preds = pd.DataFrame(np.transpose(prob_preds)[0], columns=self.labels, index=self.X_test.index)
 
         return preds, prob_preds, best_model, best_params, scores
 

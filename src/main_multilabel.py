@@ -1,18 +1,12 @@
+import pickle, pandas as pd, os, json
+import matplotlib, matplotlib.pyplot as plt
+
 from multilabel_classification import *
 from sklearn.model_selection import train_test_split
 from sklearn.feature_selection import SelectKBest, f_classif
 from sklearn.preprocessing import FunctionTransformer
-import pickle
-import pandas as pd
-import os
-import matplotlib.pyplot as plt
-import matplotlib
 from utils import *
 from multilabel_metrics import *
-import json
-
-# Ignore warnings
-import warnings
 
 # Set parameters
 plt.style.use('ggplot')
@@ -24,18 +18,19 @@ if not os.path.exists(exp_name):
     results_path = 'results/' + exp_name
     os.mkdir(results_path) 
 
-DATA_TYPE = 'CRIS'
+DATA_TYPE = 'BRCA'
 
 ########################### Load the data ###########################
 if DATA_TYPE == 'CRIS':
     label_values = ['CRIS.A', 'CRIS.B', 'CRIS.C', 'CRIS.D', 'CRIS.E']
-    with open('../data/', 'rb') as file:
-        dataset = pickle.load(file) 
-    X = dataset.drop(columns=['Patient ID', 'Subtype'] + label_values, inplace=False)
-    y = dataset.Subtype
+    with open('data/tcga_cris_raw_24356_620samples.pkl', 'rb') as file:
+        data = pickle.load(file) 
+    X = data.drop(columns=['Patient ID', 'Subtype-from Parker centroids'] + label_values, inplace=False)
+    y_pam50 = data['Subtype-from Parker centroids']
+    y_orig = data['Subtype-from Parker centroids'] # this is not important
 
 elif DATA_TYPE == 'BRCA':
-    with open('..data/dataset_multilabel.pkl', 'rb') as file:
+    with open('data/dataset_multilabel.pkl', 'rb') as file:
         data = pickle.load(file)
         label_values = ['Basal', 'Her2', 'LumA', 'LumB', 'Normal']
         X = data.drop(columns=[
@@ -45,112 +40,112 @@ elif DATA_TYPE == 'BRCA':
         y_orig = data.expert_PAM50_subtype
         y_pam50 = data['Subtype-from Parker centroids']
 
-    # Get the memberships/correlations and set negative ones to zero
-    y_corr = data[label_values]
-    y_corr_non_neg = discard_negative_correlations(y_corr)
+# Get the memberships/correlations and set negative ones to zero
+y_corr = data[label_values]
+y_corr_non_neg = discard_negative_correlations(y_corr)
 
-    # M-cut strategy to assign labels (1 or 0) to each class
-    y_mcut_labels, mcut_threshs = m_cut_strategy_class_assignment(y_corr, non_neg_values=True)
-    y_mcut_labels_neg, _ = m_cut_strategy_class_assignment(y_corr, non_neg_values=False)
-    print('M-cut average and std threshold value: ', np.mean(mcut_threshs), np.std(mcut_threshs))
+# M-cut strategy to assign labels (1 or 0) to each class
+y_mcut_labels, mcut_threshs = m_cut_strategy_class_assignment(y_corr, non_neg_values=True)
+y_mcut_labels_neg, _ = m_cut_strategy_class_assignment(y_corr, non_neg_values=False)
+print('M-cut average and std threshold value: ', np.mean(mcut_threshs), np.std(mcut_threshs))
 
-    # Assign rank based on the value of the membership/correlation
-    y_ranked_labels = y_corr.apply(rank_indices, axis=1) - 1
-    y_ranked_labels = pd.DataFrame(y_ranked_labels.values.tolist(), columns=y_corr.columns, index=y_corr.index)
+# Assign rank based on the value of the membership/correlation
+y_ranked_labels = y_corr.apply(rank_indices, axis=1) - 1
+y_ranked_labels = pd.DataFrame(y_ranked_labels.values.tolist(), columns=y_corr.columns, index=y_corr.index)
 
-    # Compare class distributions for original and two cases with m-cut
-    plot_class_distribution_comparison(data, y_mcut_labels, y_mcut_labels_neg)
+# Compare class distributions for original and two cases with m-cut
+plot_class_distribution_comparison(data, y_mcut_labels, y_mcut_labels_neg)
 
-    # Compute labels from two strategies (M-cut and 5th percentile)
-    y_mcut_5perc_labels = create_mcut_nth_percentile_labels(
-        m_cut_labels=y_mcut_labels,
-        correlations=y_corr_non_neg,
-        y=y_pam50,
-        keep_primary=True,
-        N=5
-    )
+# Compute labels from two strategies (M-cut and 5th percentile)
+y_mcut_5perc_labels = create_mcut_nth_percentile_labels(
+    m_cut_labels=y_mcut_labels,
+    correlations=y_corr_non_neg,
+    y=y_pam50,
+    keep_primary=True,
+    N=5
+)
 
-    y_mcut_10perc_labels = create_mcut_nth_percentile_labels(
-        m_cut_labels=y_mcut_labels,
-        correlations=y_corr_non_neg,
-        y=y_pam50,
-        keep_primary=True,
-        N=10
-    )
+y_mcut_10perc_labels = create_mcut_nth_percentile_labels(
+    m_cut_labels=y_mcut_labels,
+    correlations=y_corr_non_neg,
+    y=y_pam50,
+    keep_primary=True,
+    N=10
+)
 
-    y_mcut_25perc_labels = create_mcut_nth_percentile_labels(
-        m_cut_labels=y_mcut_labels,
-        correlations=y_corr_non_neg,
-        y=y_pam50,
-        keep_primary=True,
-        N=25
-    )
+y_mcut_25perc_labels = create_mcut_nth_percentile_labels(
+    m_cut_labels=y_mcut_labels,
+    correlations=y_corr_non_neg,
+    y=y_pam50,
+    keep_primary=True,
+    N=25
+)
 
-    # Check the number of misclassified 
-    misclass_samples_idx = y_orig[y_pam50!=y_orig].index
-    print('Number of missclassified samples compared to original labels: ', 
-          sum(y_pam50!=y_orig))
-    
-    # Number of labels assigned
-    ax_labels = plot_bar_counts_of_label(y_mcut_labels, y_mcut_5perc_labels,
-                                         y_mcut_10perc_labels, y_mcut_25perc_labels)
-    ax_labels.set_title('Number of labels assigned (whole dataset)')
+# Check the number of misclassified 
+misclass_samples_idx = y_orig[y_pam50!=y_orig].index
+print('Number of missclassified samples compared to original labels: ', 
+        sum(y_pam50!=y_orig))
 
-    # TODO: Plot primary and secondary labels assigned
-    ax_prim_vs_sec = plot_stacked_bars_primary_secondary_label_assigned(y_pam50, y_mcut_labels, y_mcut_5perc_labels, 
-                                                                         y_mcut_10perc_labels, y_mcut_25perc_labels)
+# Number of labels assigned
+ax_labels = plot_bar_counts_of_label(y_mcut_labels, y_mcut_5perc_labels,
+                                        y_mcut_10perc_labels, y_mcut_25perc_labels)
+ax_labels.set_title('Number of labels assigned (whole dataset)')
 
-    # Plot stacked bars for all cases
-    ax_stacked = plot_stacked_bars(y_pam50, y_mcut_labels, y_mcut_5perc_labels, 
-                                       y_mcut_10perc_labels, y_mcut_25perc_labels)
-    ax_stacked.set_title(
-        'Labels count depending on PAM50 (primary) label')
-    
-    X_train, X_test, \
-    y_train_pam50, y_test_pam50, \
-    y_train_mcut, y_test_mcut, \
-    y_train_orig, y_test_orig, \
-    y_train_5perc, y_test_5perc, \
-    y_train_10perc, y_test_10perc, \
-    y_train_25perc, y_test_25perc, \
-    y_train_ranked, y_test_ranked, \
-    y_train_corr, y_test_corr = \
-        train_test_split(X, y_pam50, 
-                         y_mcut_labels, y_orig, 
-                         y_mcut_5perc_labels, 
-                         y_mcut_10perc_labels, 
-                         y_mcut_25perc_labels,
-                         y_ranked_labels, y_corr,
-                         test_size=0.3, random_state=1, stratify=y_pam50)
+# TODO: Plot primary and secondary labels assigned
+ax_prim_vs_sec = plot_stacked_bars_primary_secondary_label_assigned(y_pam50, y_mcut_labels, y_mcut_5perc_labels, 
+                                                                        y_mcut_10perc_labels, y_mcut_25perc_labels)
 
-    # Data standardization | normalization
-    X_train = X_train.divide(X_train.sum(axis=1), axis=0) * 1e6
-    X_test = X_test.divide(X_test.sum(axis=1), axis=0) * 1e6
-    scaler = FunctionTransformer(log_transform)
-    X_train_scaled = scaler.fit_transform(X_train)
-    X_test_scaled = scaler.transform(X_test)
-    X_train_scaled = pd.DataFrame(X_train_scaled, columns=X.columns)
-    X_test_scaled = pd.DataFrame(X_test_scaled, columns=X.columns)
+# Plot stacked bars for all cases
+ax_stacked = plot_stacked_bars(y_pam50, y_mcut_labels, y_mcut_5perc_labels, 
+                                    y_mcut_10perc_labels, y_mcut_25perc_labels)
+ax_stacked.set_title(
+    'Labels count depending on PAM50 (primary) label')
 
-    # Feature selection (based on original case)
-    best_feat_model = SelectKBest(score_func=f_classif, k=500) 
-    best_feat_model.fit(X_train_scaled, y_train_orig)
-    df_scores = pd.DataFrame(best_feat_model.scores_)
-    df_feats = pd.DataFrame(X.columns)
+X_train, X_test, \
+y_train_pam50, y_test_pam50, \
+y_train_mcut, y_test_mcut, \
+y_train_orig, y_test_orig, \
+y_train_5perc, y_test_5perc, \
+y_train_10perc, y_test_10perc, \
+y_train_25perc, y_test_25perc, \
+y_train_ranked, y_test_ranked, \
+y_train_corr, y_test_corr = \
+    train_test_split(X, y_pam50, 
+                        y_mcut_labels, y_orig, 
+                        y_mcut_5perc_labels, 
+                        y_mcut_10perc_labels, 
+                        y_mcut_25perc_labels,
+                        y_ranked_labels, y_corr,
+                        test_size=0.3, random_state=1, stratify=y_pam50)
 
-    featureScores = pd.concat([df_feats, df_scores],axis=1)
-    featureScores.columns = ['Feature', 'Score'] 
+# Data standardization: log(CMP + 0.1)
+X_train = X_train.divide(X_train.sum(axis=1), axis=0) * 1e6
+X_test = X_test.divide(X_test.sum(axis=1), axis=0) * 1e6
+scaler = FunctionTransformer(log_transform)
+X_train_scaled = scaler.fit_transform(X_train)
+X_test_scaled = scaler.transform(X_test)
+X_train_scaled = pd.DataFrame(X_train_scaled, columns=X.columns)
+X_test_scaled = pd.DataFrame(X_test_scaled, columns=X.columns)
 
-    selected_feat = featureScores.sort_values(by='Score')[-500:]['Feature']
+# Feature selection 
+best_feat_model = SelectKBest(score_func=f_classif, k=500) 
+best_feat_model.fit(X_train_scaled, y_train_orig)
+df_scores = pd.DataFrame(best_feat_model.scores_)
+df_feats = pd.DataFrame(X.columns)
 
-    X_train_scaled_selected = X_train_scaled[list(selected_feat)]
-    X_test_scaled_selected = X_test_scaled[list(selected_feat)]
+featureScores = pd.concat([df_feats, df_scores],axis=1)
+featureScores.columns = ['Feature', 'Score'] 
 
-    # One-hot encoding of original and PAM50 labels
-    y_train_orig = pd.get_dummies(y_train_orig)
-    y_test_orig = pd.get_dummies(y_test_orig)
-    y_train_pam50 = pd.get_dummies(y_train_pam50)
-    y_test_pam50 = pd.get_dummies(y_test_pam50)
+selected_feat = featureScores.sort_values(by='Score')[-500:]['Feature']
+
+X_train_scaled_selected = X_train_scaled[list(selected_feat)]
+X_test_scaled_selected = X_test_scaled[list(selected_feat)]
+
+# One-hot encoding of original and PAM50 labels
+y_train_orig = pd.get_dummies(y_train_orig)
+y_test_orig = pd.get_dummies(y_test_orig)
+y_train_pam50 = pd.get_dummies(y_train_pam50)
+y_test_pam50 = pd.get_dummies(y_test_pam50)
 
 ################# Select one of 4 best models from the case 0 #################
 # XGBoost ---------------- 'run_08-05-2023_10:32:03.pkl',
