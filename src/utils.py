@@ -387,17 +387,15 @@ def plot_stacked_bars_primary_secondary_label_assigned(y, y_mcut_labels, y_5perc
     return ax
 
 
-
-
-def check_dim(model, x_check=None):
-    # Check model dimensions
-    if isinstance(model, AutoEncoder):
-        x_check = torch.randn(10, 1, 25150)
-        if model(x_check).shape==torch.Size([10,1,25150]):
-            print('Model is well defined!')
-    elif isinstance(model, Classifier):
-        if model(x_check).shape==torch.Size([1,5]):
-            print('Model is well defined!')
+# def check_dim(model, x_check=None):
+#     # Check model dimensions
+#     if isinstance(model, AutoEncoder):
+#         x_check = torch.randn(10, 1, 25150)
+#         if model(x_check).shape==torch.Size([10,1,25150]):
+#             print('Model is well defined!')
+#     elif isinstance(model, Classifier):
+#         if model(x_check).shape==torch.Size([1,5]):
+#             print('Model is well defined!')
 
 def cmp_metrics(pred, y_test) -> dict:
 
