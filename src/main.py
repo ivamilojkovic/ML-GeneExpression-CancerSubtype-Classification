@@ -7,36 +7,33 @@ from sklearn.neighbors import KNeighborsClassifier
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.ensemble import RandomForestClassifier, ExtraTreesClassifier, AdaBoostClassifier
 from sklearn.svm import SVC
-from sklearn.feature_selection import SelectFromModel, SelectKBest, RFE, f_classif, chi2
-#from mlxtend.feature_selection import SequentialFeatureSelector
-import os, pickle, datetime, time
-from sklearn.feature_selection import RFECV
-
-import pickle as pkl
-from data_preprocessing import ClassBalance, remove_extreme
-import matplotlib.pyplot as plt
-import seaborn as sns
-import pandas as pd
-import numpy as np
-from utils import cmp_metrics, m_cut_strategy_class_assignment
-import xgboost as xgb
-import lightgbm as lgb
-from utils import log_transform, plot_before_after_counts, plot_pca, NumpyEncoder
+from sklearn.feature_selection import SelectFromModel, SelectKBest, RFE, RFECV, f_classif
 from sklearn.decomposition import PCA
+from mlxtend.feature_selection import SequentialFeatureSelector
+import xgboost as xgb, lightgbm as lgb
+
+import os, datetime, time
+import pickle, pandas as pd, numpy as np, json
+import matplotlib.pyplot as plt, seaborn as sns
+import matplotlib as mpl
+
+from data_preprocessing import ClassBalance, remove_extreme
+from utils import cmp_metrics, m_cut_strategy_class_assignment
+from utils import log_transform, plot_before_after_counts, plot_pca, NumpyEncoder
 from config_model import *
-import json, codecs
 from singlelabel_metrics import *
 
 plt.style.use('ggplot')
 plt.rcParams.update({'font.size': 12})
+mpl.rcParams["font.family"] = "serif"
+mpl.rcParams["font.serif"] = ["Times New Roman"]
 sns.set_theme()
 
 from warnings import simplefilter
 from sklearn.exceptions import ConvergenceWarning
 simplefilter("ignore", category=ConvergenceWarning)
 
-import mlflow
-import hydra
+import mlflow, hydra
 from hydra.core.config_store import ConfigStore
 from omegaconf import DictConfig, OmegaConf
 from config import *
@@ -52,18 +49,24 @@ cs.store(name='project_config', node=ProjectConfig)
 @hydra.main(config_path="../conf", config_name="config")
 def main(cfg: ProjectConfig):
 
+    plt.style.use('ggplot')
+    plt.rcParams.update({'font.size': 12})
+    plt.rcParams["font.family"] = "serif"
+    plt.rcParams["font.serif"] = ["Times New Roman"]
+    sns.set_theme()
+
     # Loading the dataset
     if cfg.train.brca_cris == 'BRCA':
         if cfg.train.use_multilabel_dataset:
             with open(cfg.paths.ml_dataset, 'rb') as file:
-                dataset = pkl.load(file) 
+                dataset = pickle.load(file) 
             X = dataset.drop(columns=['expert_PAM50_subtype', 'tcga_id',
                             'Subtype-from Parker centroids', 'MaxCorr',
                                 'Basal', 'Her2', 'LumA', 'LumB', 'Normal'], inplace=False)
             y = dataset['Subtype-from Parker centroids']
         else:
             with open(cfg.paths.brca_dataset, 'rb') as file:
-                dataset = pkl.load(file) 
+                dataset = pickle.load(file) 
             X = dataset.drop(columns=['expert_PAM50_subtype', 'tcga_id', \
                                     'sample_id', 'cancer_type'], inplace=False)
             y = dataset.expert_PAM50_subtype
@@ -71,7 +74,7 @@ def main(cfg: ProjectConfig):
     elif cfg.train.brca_cris == 'CRIS':
         label_values = ['CRIS.A', 'CRIS.B', 'CRIS.C', 'CRIS.D', 'CRIS.E']
         with open(cfg.paths.cris_dataset, 'rb') as file:
-            dataset = pkl.load(file) 
+            dataset = pickle.load(file) 
         X = dataset.drop(columns=['Patient ID', 'Subtype-from Parker centroids'] + label_values, inplace=False)
         y = dataset['Subtype-from Parker centroids']
     
@@ -221,117 +224,46 @@ def main(cfg: ProjectConfig):
     else:
         X_test_scaled = scaler.transform(X_test)
         X_test_scaled = pd.DataFrame(X_test_scaled, columns=X.columns)
-
-    # PCA
-    if cfg.train.type_class_imbalance=='case3' or cfg.train.type_class_imbalance=='case4':
-        pca_2 = PCA(n_components=2)
-        df_pca_2 = pd.DataFrame(pca_2.fit_transform(X_train_scaled), columns=['PCA_1', 'PCA_2'])
-
-        pca_3 = PCA(n_components=3)
-        df_pca_3 = pd.DataFrame(pca_3.fit_transform(X_train_scaled), columns=['PCA_1', 'PCA_2', 'PCA_3'])
-
-        unique = pd.concat([X_train_scaled, scaler.transform(new_samples)]).drop_duplicates(keep=False)
-        new_train_samples = pd.concat([X_train_scaled, unique]).drop_duplicates(keep=False)
-
-        plot_pca(df_pca_2, LB.inverse_transform(y_train), new_train_samples.index)
-        plot_pca(df_pca_3, LB.inverse_transform(y_train), new_train_samples.index, dim=3)
         
     # --------- Feature selection ------------
 
     if cfg.train.type_feat_selection == 'univariate':
+
+        # Use F-test to select defined number of features (500 or 1000)
         best_feat_model = SelectKBest(score_func=f_classif, k=cfg.train.num_feat) # k needs to be defined
         best_feat_model.fit(X_train_scaled, y_train)
-        df_scores = pd.DataFrame(best_feat_model.scores_)
-        df_feats = pd.DataFrame(X.columns)
 
-        featureScores = pd.concat([df_feats, df_scores],axis=1)
-        featureScores.columns = ['Feature', 'Score'] 
-        
-        plt.figure()
-        featureScores.nlargest(50, 'Score').plot(kind='barh')
-        plt.title(cfg.train.type_feat_selection + ' feature selection')
-        print(featureScores.nlargest(10, 'Score'))
-
-        selected_feat = featureScores.sort_values(by='Score')[-cfg.train.num_feat:]['Feature']
+        selected_feat = list(X_train_scaled.columns[best_feat_model.get_support()])
     
     elif cfg.train.type_feat_selection == 'hybrid':
-        hybrid_feat_selection_path = os.path.join(cfg.paths.data, 'feat_select_gt_50_perc_occur.pkl') # could be ['hybrid_features_800.pkl'...]
+        if cfg.train.brca_cris == 'CRIS':
+            hybrid_feat_selection_path = os.path.join('/Users/ivamilojkovic/Breast-Cancer-Analysis/data/cris/new2_without_corr_removed_feat_select_gt_40_perc_occur.pkl') 
+        else:
+            hybrid_feat_selection_path = os.path.join('/Users/ivamilojkovic/Breast-Cancer-Analysis/data/brca/without_corr_removed_feat_select_gt_50_perc_occur.pkl') # could be ['hybrid_features_800.pickle'...]
+            
         if not os.path.exists(hybrid_feat_selection_path):
-            # Apply filtering method 
-            filter_model = SelectKBest(score_func=f_classif, k=cfg.train.num_feat) # k needs to be defined
-            filter_model.fit(X_train_scaled, y_train)
-            mask = filter_model.get_support()
-            selected_feat = X.columns[mask]
-            X_selected = X_train_scaled[selected_feat]
+            pass
+            # # Apply filtering method 
+            # filter_model = SelectKBest(score_func=f_classif, k=cfg.train.num_feat) # k needs to be defined
+            # filter_model.fit(X_train_scaled, y_train)
+            # mask = filter_model.get_support()
+            # selected_feat = X.columns[mask]
+            # X_selected = X_train_scaled[selected_feat]
 
-            # Now apply backward feature elimination
-            model = LogisticRegression(penalty='l2')
-            selector = RFECV(estimator=model, scoring='accuracy', step=1, cv=3, verbose=3, n_jobs=1)
-            selector.fit(X_selected, y_train)
-            print('Number of fetures selected: ', selector.n_features_)
-            selected_feat = X_selected.columns[selector.get_support()]
-            experiment_params['n_features_selected'] = selector.n_features_
+            # # Now apply backward feature elimination
+            # model = LogisticRegression(penalty='l2')
+            # selector = RFECV(estimator=model, scoring='accuracy', step=1, cv=3, verbose=3, n_jobs=1)
+            # selector.fit(X_selected, y_train)
+            # print('Number of fetures selected: ', selector.n_features_)
+            # selected_feat = X_selected.columns[selector.get_support()]
+            # experiment_params['n_features_selected'] = selector.n_features_
 
-            with open(hybrid_feat_selection_path, 'wb') as file:
-                pickle.dump(selected_feat, file)
+            # with open(hybrid_feat_selection_path, 'wb') as file:
+            #     pickle.dump(selected_feat, file)
         
         # Load selected features
         with open(hybrid_feat_selection_path, 'rb') as file:
             selected_feat = pickle.load(file)
-
-    elif cfg.train.type_feat_selection == 'filter':
-        with open('high_corr_feat.pkl', 'rb') as file:
-            selected_feat = pickle.load(file)
-
-    elif cfg.train.type_feat_selection == 'recursive':
-        rfe_selector = RFE(estimator=LogisticRegression(), 
-                        n_features_to_select=cfg.train.num_feat, step=10, verbose=5)
-        rfe_selector.fit(X_train_scaled, y_train)
-        rfe_support = rfe_selector.get_support()
-
-        selected_feat = X.loc[:,rfe_support].columns.tolist()
-        print(str(len(selected_feat)), 'selected features')
-
-    elif cfg.train.type_feat_selection == 'Wrapper':
-        best_feat_model  = ExtraTreesClassifier(n_estimators=10)
-        best_feat_model.fit(X_train_scaled, y_train)
-        
-        plt.figure()
-        feat_importances = pd.Series(best_feat_model.feature_importances_, index=X.columns)
-        feat_importances.nlargest(50).plot(kind='barh')
-
-        plt.figure()
-        plt.plot(sorted(best_feat_model.feature_importances_))
-        plt.title(cfg.train.type_feat_selection + ' feature selection')
-
-        selected_feat = dict(feat_importances.sort_values()[-cfg.train.num_feat:]).keys()
-
-    elif cfg.train.type_feat_selection == 'embedded':
-        model = LogisticRegression(C=0.1)
-        selector = SelectFromModel(model, threshold=0.025) 
-        selector.fit_transform(X_train_scaled, y_train)
-        selected_feat = X_train_scaled.columns[selector.get_support()]
-
-    elif cfg.train.type_feat_selection == 'wrapper':
-        if os.path.exists('feat50.pkl'):
-            with open('feat50.pkl', 'rb') as f:
-                selected_feat = pickle.load(f)
-        else:
-            # Forward Feature Selection
-            model = DecisionTreeClassifier(criterion='log_loss', random_state=42)
-            selector = SequentialFeatureSelector(model, k_features=50, 
-                                                forward=True, verbose=2,
-                                                floating=False, cv=3, 
-                                                scoring='f1_weighted', n_jobs=-1)
-            selector.fit(X_train_scaled, y_train)
-            selected_feat = list(selector.k_feature_names_)
-    
-    elif cfg.train.type_feat_selection == 'wrapper_reg':
-        model = Lasso(alpha=0.0001, random_state=42)
-        selector = SelectFromModel(model, threshold=0.001) 
-        selector.fit_transform(X_train_scaled, y_train)
-        selector.fit(X_train_scaled, y_train)
-        selected_feat = X_train_scaled.columns[selector.get_support()]
 
     # Check how many features from initial preprocessing overlap after main selection
     overlapped_feat = set(selected_feat).intersection(set(feat_to_keep))
@@ -339,7 +271,7 @@ def main(cfg: ProjectConfig):
     print('Number of features selected: ', len(selected_feat))
 
     # Extract the data frames with only selected features
-    X_train_scaled_selected = X_train_scaled[list(selected_feat)]
+    X_train_scaled_selected = X_train_scaled[selected_feat]
     if cfg.train.downsample_test:
         for i, X_test in enumerate(list_X_test):
             list_X_test[i] = X_test[list(selected_feat)]
@@ -347,7 +279,6 @@ def main(cfg: ProjectConfig):
         X_test_scaled_selected = X_test_scaled[list(selected_feat)]
 
     # MODEL TYPE = {
-    #   MLP Classifier
     #   Logistic Regression
     #   KNN
     #   Decision Tree
@@ -359,10 +290,10 @@ def main(cfg: ProjectConfig):
     #   }
 
     # MODEL_TYPES = ['Logistic Regression', 'KNN', 'Decision Tree', 
-    #                'SVC', 'Random Forest', 'XGBoost', 
+    #                'Random Forest', 'SVC', 'XGBoost',
     #                'LightGBM', 'AdaBoost']
-    # MODEL_TYPES = ['Logistic Regression', 'SVC', 'Random Forest', 'XGBoost']
-    MODEL_TYPES = ['XGBoost']
+    MODEL_TYPES = ['Logistic Regression', 'SVC', 'Random Forest', 'XGBoost']
+    # MODEL_TYPES = ['KNN']
 
     for MODEL_TYPE in MODEL_TYPES:
 
@@ -389,7 +320,7 @@ def main(cfg: ProjectConfig):
             'solve_ibm': cfg.train.solve_class_imbalance,
             'ci_type': cfg.train.type_class_imbalance,
             'cross_validation': cfg.train.cross_val,
-            'multi_label_classification': False,
+            'multi_label_classification': cfg.train.use_multilabel_dataset,
             'n_folds': cfg.train.num_folds,
             'n_features_to_select': cfg.train.num_feat,
             'test_size': cfg.train.test_size,
@@ -426,25 +357,14 @@ def main(cfg: ProjectConfig):
             if cfg.train.optim:
                 classifier = LogisticRegression(random_state=cfg.train.random_state)
             else:
-                if cfg.train.type_class_imbalance=='case1': 
-                    if cfg.train.thresh_lumA == 200:
-                        exp_name = 'run_09-05-2023_02:29:40'
-                    elif cfg.train.thresh_lumA == 225:
-                        exp_name = 'run_11-05-2023_01:10:33'
-                    elif cfg.train.thresh_lumA == 250:
-                        exp_name = 'run_11-05-2023_19:37:56'
-                    elif cfg.train.thresh_lumA == 175:
-                        exp_name = 'run_09-05-2023_20:51:26'
-
-                if cfg.train.type_class_imbalance=='case2':
-                    exp_name = 'run_09-05-2023_20:51:26'
-                elif cfg.train.type_class_imbalance=='case3':
-                    exp_name = 'run_10-05-2023_00:18:29'
-                elif cfg.train.type_class_imbalance=='case4':
-                    exp_name = 'run_10-05-2023_12:10:55'
-
-                with open(os.path.join(cfg.paths.model, 'bestmodel_' + exp_name + '.pkl'), 'rb') as file:
-                    classifier = pickle.load(file)
+                if cfg.train.brca_cris == 'BRCA':
+                    path = '/Users/ivamilojkovic/Breast-Cancer-Analysis/final_results/BRCA/single-label/SUBTYPE_PAM50/feat_select_hybrid'
+                    exp_name = 'bestmodel_LogisticRegression_run_28-08-2023_13:08:54.pkl'
+                elif cfg.train.brca_cris == 'CRIS':
+                    path = '/Users/ivamilojkovic/Breast-Cancer-Analysis/final_results/CRIS/single-label/01-14-52'
+                    exp_name = 'bestmodel_LogisticRegression_run_01-09-2023_01:15:05.pkl'
+            with open(os.path.join(path, exp_name), 'rb') as file:
+                classifier = pickle.load(file)
             
         elif MODEL_TYPE == 'KNN':
             classifier = KNeighborsClassifier()
@@ -456,33 +376,41 @@ def main(cfg: ProjectConfig):
             if cfg.train.optim:
                 classifier = SVC(random_state=cfg.train.random_state)
             else:
-                exp_name = 'run_09-05-2023_02:29:40'
-                with open(os.path.join(cfg.paths.model, 'bestmodel_' + exp_name + '.pkl'), 'rb') as file:
-                    classifier = pickle.load(file)
+                if cfg.train.brca_cris == 'BRCA':
+                    path = '/Users/ivamilojkovic/Breast-Cancer-Analysis/final_results/BRCA/single-label/SUBTYPE_PAM50/feat_select_hybrid'
+                    exp_name = 'bestmodel_SVC_run_28-08-2023_14:00:35.pkl'
+                elif cfg.train.brca_cris == 'CRIS':
+                    path = '/Users/ivamilojkovic/Breast-Cancer-Analysis/final_results/CRIS/single-label/01-14-52'
+                    exp_name = 'bestmodel_SVC_run_01-09-2023_01:59:53.pkl'
+            with open(os.path.join(path, exp_name), 'rb') as file:
+                classifier = pickle.load(file)
 
         elif MODEL_TYPE == 'Random Forest':
-            if cfg.train.solve_class_imbalance:
-                if cfg.train.type_class_imbalance == 'case3':
-                    classifier = RandomForestClassifier(
-                        random_state=cfg.train.random_state,
-                        criterion='gini', min_samples_leaf=3,
-                        min_samples_split=2, n_estimators=50)
-                elif cfg.train.type_class_imbalance == 'case1':
-                    exp_name = 'run_08-05-2023_03:06:27'
-                    with open(os.path.join(cfg.paths.model, 'bestmodel_' + exp_name + '.pkl'), 'rb') as file:
-                        classifier = pickle.load(file)
-                else:
-                    classifier = RandomForestClassifier(random_state=cfg.train.random_state)
-            else:
+            if cfg.train.optim:
                 classifier = RandomForestClassifier(random_state=cfg.train.random_state)
-
+            else:
+                if cfg.train.brca_cris == 'BRCA':
+                    path = '/Users/ivamilojkovic/Breast-Cancer-Analysis/final_results/BRCA/single-label/SUBTYPE_PAM50/feat_select_hybrid'
+                    exp_name = 'bestmodel_RandomForest_run_28-08-2023_13:44:47.pkl'
+                elif cfg.train.brca_cris == 'CRIS':
+                    path = '/Users/ivamilojkovic/Breast-Cancer-Analysis/final_results/CRIS/single-label/01-14-52'
+                    exp_name = 'bestmodel_RandomForest_run_01-09-2023_01:42:48.pkl'
+            with open(os.path.join(path, exp_name), 'rb') as file:
+                classifier = pickle.load(file)
+                
         elif MODEL_TYPE == 'XGBoost':
             if cfg.train.optim:
                 classifier = xgb.XGBClassifier(random_state=cfg.train.random_state)
             else:
-                exp_name = 'run_08-05-2023_10:32:03'
-                with open(os.path.join(cfg.paths.model, 'bestmodel_' + exp_name + '.pkl'), 'rb') as file:
+                if cfg.train.brca_cris == 'BRCA':
+                        path = '/Users/ivamilojkovic/Breast-Cancer-Analysis/final_results/BRCA/single-label/SUBTYPE_PAM50/feat_select_hybrid'
+                        exp_name = 'bestmodel_XGBoost_run_28-08-2023_05:09:55.pkl'
+                elif cfg.train.brca_cris == 'CRIS':
+                    path = '/Users/ivamilojkovic/Breast-Cancer-Analysis/final_results/CRIS/single-label/01-14-52'
+                    exp_name = 'bestmodel_XGBoost_run_01-09-2023_03:49:46.pkl'
+                with open(os.path.join(path, exp_name), 'rb') as file:
                     classifier = pickle.load(file)
+
         elif MODEL_TYPE == 'LightGBM':
             classifier = lgb.LGBMClassifier(random_state=cfg.train.random_state)
         elif MODEL_TYPE == 'AdaBoost':
@@ -491,14 +419,8 @@ def main(cfg: ProjectConfig):
             print('There no such model to be choosen! Try again!')
             exit()
 
-        # ---------------- Cross-validation ---------------
-        if cfg.train.cross_val:
-            scores = cross_val_score(classifier, X_train_scaled, y_train,
-                                    scoring='neg_log_loss', 
-                                    cv=cfg.train.num_folds, verbose=5)
-
         # Save data for training and testing
-        with open(os.path.join(cfg.paths.artefacts, experiment_name + '.pkl'), 'wb') as file:
+        with open(os.path.join(cfg.paths.artefacts, experiment_name + '.pickle'), 'wb') as file:
             pickle.dump([X_train_scaled_selected, LB.inverse_transform(y_train),
                          X_test_scaled_selected, LB.inverse_transform(y_test)], file)
             
@@ -613,7 +535,7 @@ def main(cfg: ProjectConfig):
                 json.dump(json_file, file)
 
             # Save the best model
-            best_model_filename = 'bestmodel_' + MODEL_TYPE.replace(' ', '') + '_' + experiment_name + '.pkl'
+            best_model_filename = 'bestmodel_' + MODEL_TYPE.replace(' ', '') + '_' + experiment_name + '.pickle'
             with open(os.path.join(cfg.paths.single_label_model, best_model_filename), 'wb') as file:
                 pickle.dump(model, file)
 
@@ -662,7 +584,7 @@ def main(cfg: ProjectConfig):
             df_lr = pd.DataFrame({'Precision': mean_prec,
                             'Recall': mean_rec,
                             'F1 score': mean_f1}, 
-                            index=['LumA', 'LumB', 'Basal', 'Her2', 'Normal'])
+                            index= LB.classes_)
             if not cfg.train.solve_class_imbalance:
                 ax = df_lr.plot(kind='bar', rot=30, title='Scores for ' + 'case-0' +' best model',
                                 yerr=[std_prec, std_rec, std_f1])
@@ -670,6 +592,7 @@ def main(cfg: ProjectConfig):
                 ax = df_lr.plot(kind='bar', rot=30, title='Scores for ' + case_name +' best model',
                                 yerr=[std_prec, std_rec, std_f1])
             plt.legend(loc='lower right')
+            plt.savefig('Confuson matrix ' + MODEL_TYPE + '.png')
             print()
 
         else:
@@ -688,13 +611,19 @@ def main(cfg: ProjectConfig):
             with open(exp_params_filename, "w") as file:
                 json.dump(json_file, file)
 
-            ax = plt.figure()
+            ax = plt.figure(figsize=(16, 8))
             df_lr = pd.DataFrame({'Precision': test_metrics['Precision per class'],
                             'Recall': test_metrics['Recall per class'],
                             'F1 score': test_metrics['F1 score per class']}, 
-                            index=['LumA', 'LumB', 'Basal', 'Her2', 'Normal'])
-            ax = df_lr.plot(kind='bar', rot=30, title='Scores for ' + case_name +' best model')
+                            index=LB.classes_)
+            ax = df_lr.plot(kind='bar', rot=30, title=MODEL_TYPE, width=0.8)
+            # Add values above each bar
+            for p in ax.patches:
+                ax.annotate(f'{p.get_height():.2f}', (p.get_x() + p.get_width() / 2., p.get_height()),
+                            ha='center', va='center', xytext=(0, 5), textcoords='offset points', fontsize=10)
             plt.legend(loc='lower right')
+            plt.gcf().set_size_inches(12, 6)
+            plt.savefig('Barplot ' + MODEL_TYPE + '.png')
 
             # ----------------- Track metrics -------------------
             mlflow.log_metric("accuracy_weighted_average", test_metrics['Accuracy weighted'])
@@ -712,7 +641,7 @@ def main(cfg: ProjectConfig):
             # Plot confusion matrix
             conf_mat = confusion_matrix(y_test, pred) 
             # conf_mat_norm = confusion_matrix(y_test, pred, normalize='true')
-            conf_mat_percentage = conf_mat / conf_mat.sum(axis=0)  
+            conf_mat_percentage = conf_mat / conf_mat.sum(axis=1).reshape(-1,1)
 
             class_cnts = ['{0:0.0f}'.format(value) for value in conf_mat.flatten()]
             class_percentages = ['{0:.2%}'.format(value) for value in conf_mat_percentage.flatten()]   
@@ -727,32 +656,33 @@ def main(cfg: ProjectConfig):
             #sns.heatmap(df.div(df.values.sum()), annot=True)
             sns.heatmap(df, annot=labels, fmt='', cmap='Greens')
             if not cfg.train.solve_class_imbalance:
-                plt.title('Confusion matrix for ' + MODEL_TYPE + ' (best model)')
+                plt.title(MODEL_TYPE)
             else:
                 plt.title('Confusion matrix for ' + case_name + ' best model')
-            
+
             plt.ylabel('True class')
             plt.xlabel('Predicted class')
-            plt.show()
+            plt.savefig(MODEL_TYPE + '.png')
+            plt.show(block=False)
 
-        # Save the experiment properties as .pkl file
-        if not cfg.train.downsample_test and cfg.train.optim:
-            if not cfg.train.solve_class_imbalance:
-                with open(os.path.join(cfg.paths.experiment, 'case_0', experiment_name + '.pkl'), 'wb') as file:
-                    pickle.dump(experiment_params, file)
-            else:
-                if cfg.train.type_class_imbalance=='case1':
-                    with open(os.path.join(cfg.paths.experiment, 'case_1', experiment_name + '.pkl'), 'wb') as file:
+            # Save the experiment properties as .pickle file
+            if not cfg.train.downsample_test and cfg.train.optim:
+                if not cfg.train.solve_class_imbalance:
+                    with open(os.path.join(cfg.paths.experiment, 'case_0', experiment_name + '.pickle'), 'wb') as file:
                         pickle.dump(experiment_params, file)
-                if cfg.train.type_class_imbalance=='case2':
-                    with open(os.path.join(cfg.paths.experiment, 'case_2', experiment_name + '.pkl'), 'wb') as file:
-                        pickle.dump(experiment_params, file)
-                if cfg.train.type_class_imbalance=='case3':
-                    with open(os.path.join(cfg.paths.experiment, 'case_3', experiment_name + '.pkl'), 'wb') as file:
-                        pickle.dump(experiment_params, file)
-                if cfg.train.type_class_imbalance=='case4':
-                    with open(os.path.join(cfg.paths.experiment, 'case_4', experiment_name + '.pkl'), 'wb') as file:
-                        pickle.dump(experiment_params, file)
+                else:
+                    if cfg.train.type_class_imbalance=='case1':
+                        with open(os.path.join(cfg.paths.experiment, 'case_1', experiment_name + '.pickle'), 'wb') as file:
+                            pickle.dump(experiment_params, file)
+                    if cfg.train.type_class_imbalance=='case2':
+                        with open(os.path.join(cfg.paths.experiment, 'case_2', experiment_name + '.pickle'), 'wb') as file:
+                            pickle.dump(experiment_params, file)
+                    if cfg.train.type_class_imbalance=='case3':
+                        with open(os.path.join(cfg.paths.experiment, 'case_3', experiment_name + '.pickle'), 'wb') as file:
+                            pickle.dump(experiment_params, file)
+                    if cfg.train.type_class_imbalance=='case4':
+                        with open(os.path.join(cfg.paths.experiment, 'case_4', experiment_name + '.pickle'), 'wb') as file:
+                            pickle.dump(experiment_params, file)
 
         time.sleep(2)
         mlflow.end_run()

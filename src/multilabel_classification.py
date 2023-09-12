@@ -14,11 +14,12 @@ import xgboost as xgb
 from sklearn.svm import SVC
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import GridSearchCV
+from sklearn.model_selection import GridSearchCV, StratifiedKFold, KFold
 import itertools
 from skmultilearn.ensemble import LabelSpacePartitioningClassifier
 from config_model import MULTILABEL_MODEL_PARAMS
 import pickle, time, datetime
+from sklearn.preprocessing import normalize
 
 class MultiLabelClassification():
     def __init__(self, X_train, y_train, X_test, y_test):
@@ -130,13 +131,22 @@ class MultiLabel_BinaryRelevance(MultiLabelClassification):
                 additional_params[new_key] = value
         
             # Create the grid search object
-            LabelRankLoss = make_scorer(label_ranking_loss, greater_is_better=False, needs_proba=True)
-            grid_search = GridSearchCV(clf, param_grid=additional_params, 
-                                       scoring=LabelRankLoss, verbose=3, 
-                                       cv=5, return_train_score=True) # f1_weighted
+            # LabelRankLoss = make_scorer(label_ranking_loss, greater_is_better=False, needs_proba=True)
+            grid_search = GridSearchCV(
+                estimator=clf, 
+                param_grid=additional_params,
+                scoring= 'f1_weighted',  # f1_weighted, accuracy...
+                verbose=2, 
+                cv=KFold(
+                    n_splits=5, 
+                    shuffle=True, 
+                    random_state=123), 
+                return_train_score=True, 
+                refit=True) 
 
             # Fit the grid search to the data
-            grid_search.fit(self.X_train, self.y_train)
+            grid_search.fit(self.X_train.values, self.y_train.values)
+            # grid_search.fit(self.X_train, self.y_train)
 
             # Get the best model
             best_model = grid_search.best_estimator_
@@ -147,8 +157,8 @@ class MultiLabel_BinaryRelevance(MultiLabelClassification):
             train_scores = grid_search.cv_results_['mean_train_score']
 
             # Calculate the average score and standard deviation
-            avg_val_score, std_val_score = np.mean(validation_scores), np.std(validation_scores)
-            avg_train_score, std_train_score = np.mean(train_scores), np.std(train_scores)
+            avg_val_score, std_val_score = np.nanmean(validation_scores), np.nanstd(validation_scores)
+            avg_train_score, std_train_score = np.nanmean(train_scores), np.nanstd(train_scores)
 
             print("Average training score:", avg_train_score)
             print("Training score standard deviation:", std_train_score)
@@ -239,15 +249,29 @@ class MultiLabel_Chains(MultiLabelClassification):
                 }
             
             # Create the grid search object
-            grid_search = GridSearchCV(chain, param_grid=param_grid, scoring='f1_weighted', verbose=3)
+            grid_search = GridSearchCV(
+                chain, 
+                param_grid=param_grid, 
+                scoring='f1_weighted', 
+                verbose=2,
+                cv=KFold(
+                    n_splits=5, 
+                    shuffle=True, 
+                    random_state=123), 
+                return_train_score=True, 
+                refit=True)
 
+            
             # Fit the grid search to the data
-            grid_search.fit(self.X_train, self.y_train)
+            grid_search.fit(self.X_train.values, self.y_train.values)
+
+            # if isinstance(model, RandomForestClassifier):
+            #     grid_search.fit(self.X_train.values, self.y_train.values)
+            # else:
+            #     grid_search.fit(self.X_train, self.y_train)
 
             # Get best model
             chain = grid_search.best_estimator_
-        else:
-            chain.fit(self.X_train, self.y_train)
 
         if optimize_model:
             if isinstance(model, LogisticRegression):
@@ -260,7 +284,7 @@ class MultiLabel_Chains(MultiLabelClassification):
                 model_name = 'SVC'
 
             additional_params = {
-                'classifier__order': all_orders, # Order in which labels are chained
+                'classifier__order': [[0, 1, 2, 3, 4]], # Order in which labels are chained [[0, 1, 2, 3, 4]]
                 'classifier__classifier': [base]
                 }
             for key, value in MULTILABEL_MODEL_PARAMS[model_name].items():
@@ -268,15 +292,23 @@ class MultiLabel_Chains(MultiLabelClassification):
                 additional_params[new_key] = value
         
             # Create the grid search object
-            grid_search = GridSearchCV(chain, param_grid=additional_params, 
-                                       scoring='f1_weighted', cv=5, verbose=3,
-                                       return_train_score=True)
+            grid_search = GridSearchCV(
+                chain, 
+                param_grid=additional_params, 
+                scoring='f1_weighted', 
+                verbose=2,
+                cv=KFold(
+                    n_splits=5, 
+                    shuffle=True, 
+                    random_state=123), 
+                return_train_score=True, 
+                refit=True)
 
             # Fit the grid search to the data
             grid_search.fit(self.X_train, self.y_train)
 
-            # Get the best model
-            best_model = grid_search.best_estimator_
+            # Get best model
+            chain = grid_search.best_estimator_
             best_params = grid_search.best_params_
 
             # Get cross-validation scores (averagre and std value of train/validation score)
@@ -284,8 +316,8 @@ class MultiLabel_Chains(MultiLabelClassification):
             train_scores = grid_search.cv_results_['mean_train_score']
 
             # Calculate the average score and standard deviation
-            avg_val_score, std_val_score = np.mean(validation_scores), np.std(validation_scores)
-            avg_train_score, std_train_score = np.mean(train_scores), np.std(train_scores)
+            avg_val_score, std_val_score = np.nanmean(validation_scores), np.nanstd(validation_scores)
+            avg_train_score, std_train_score = np.nanmean(train_scores), np.nanstd(train_scores)
 
             print("Average training score:", avg_train_score)
             print("Training score standard deviation:", std_train_score)
@@ -306,18 +338,21 @@ class MultiLabel_Chains(MultiLabelClassification):
 
             now = datetime.datetime.now().strftime("%d-%m-%Y_%H:%M:%S")
             with open('ml_best_model_lr' + now + '.pkl', 'wb') as file:
-                pickle.dump(best_model, file)
+                pickle.dump(chain, file)
             
             with open('best_model_cv_scores' + now + '.pkl', 'wb') as file:
                 pickle.dump(scores, file)
+        else:
+            chain.fit(self.X_train, self.y_train)
 
+            
         # Compute probability predictions and predictions
         y_pred = chain.predict(self.X_test).toarray()
         y_pred = pd.DataFrame(y_pred, columns=self.y_test.columns, dtype='int')
         y_pred_prob = chain.predict_proba(self.X_test).toarray()
         y_pred_prob = pd.DataFrame(y_pred_prob, columns=self.y_test.columns)
         
-        return y_pred, y_pred_prob, best_model, best_params, scores
+        return y_pred, y_pred_prob, chain, best_params, scores
 
 class MultiLabel_PowerSet(MultiLabelClassification):
 
@@ -354,14 +389,53 @@ class MultiLabel_PowerSet(MultiLabelClassification):
                 additional_params[new_key] = value
 
             # Create the grid search object
-            grid_search = GridSearchCV(clf, param_grid=additional_params, scoring='f1_weighted', verbose=3, cv=5)
-
+            grid_search = GridSearchCV(
+                estimator=clf, 
+                param_grid=additional_params, 
+                scoring='f1_weighted', 
+                verbose=2,
+                cv=KFold(
+                    n_splits=5, 
+                    shuffle=True, 
+                    random_state=123), 
+                return_train_score=True, 
+                refit=True)
+            
             # Fit the grid search to the data
-            grid_search.fit(self.X_train, self.y_train)
+            grid_search.fit(self.X_train.values, self.y_train.values)
+            # if isinstance(model, RandomForestClassifier):
+            #     grid_search.fit(self.X_train.values, self.y_train.values)
+            # else:
+            #     grid_search.fit(self.X_train, self.y_train)
 
             # Get the best model
             clf = grid_search.best_estimator_
-            print(grid_search.best_params_)
+            best_params = grid_search.best_params_
+
+            # Get cross-validation scores (averagre and std value of train/validation score)
+            validation_scores = grid_search.cv_results_['mean_test_score']
+            train_scores = grid_search.cv_results_['mean_train_score']
+
+            # Calculate the average score and standard deviation
+            avg_val_score, std_val_score = np.nanmean(validation_scores), np.nanstd(validation_scores)
+            avg_train_score, std_train_score = np.nanmean(train_scores), np.nanstd(train_scores)
+
+            print("Average training score:", avg_train_score)
+            print("Training score standard deviation:", std_train_score)
+
+            print("Average validation score:", avg_val_score)
+            print("Validation score standard deviation:", std_val_score)
+
+            scores = {
+                'Train': {
+                    'average': avg_train_score,
+                    'std': std_train_score,
+                },
+                'Validation': {
+                    'average': avg_val_score,
+                    'std': std_val_score,
+                }
+            }
 
             now = datetime.datetime.now().strftime("%d-%m-%Y_%H:%M:%S")
             with open('ml_best_model_lr' + now + '.pkl', 'wb') as file:
@@ -376,8 +450,14 @@ class MultiLabel_PowerSet(MultiLabelClassification):
             pred = clf.predict(self.X_test.values)
             pred_prob = clf.predict_proba(self.X_test.values)
 
-        return pd.DataFrame(pred, columns=self.y_test.columns),\
-              pd.DataFrame(pred_prob, columns=self.y_test.columns)
+        # Compute probability predictions and predictions
+        y_pred = clf.predict(self.X_test).toarray()
+        y_pred = pd.DataFrame(y_pred, columns=self.y_test.columns, dtype='int')
+        y_pred_prob = clf.predict_proba(self.X_test).toarray()
+        y_pred_prob = pd.DataFrame(y_pred_prob, columns=self.y_test.columns)
+
+        return y_pred, y_pred_prob, clf, best_params, scores
+
 
 class MultiLabel_Adapted(MultiLabelClassification):
 
@@ -420,24 +500,61 @@ class MultiLabel_Adapted(MultiLabelClassification):
                 estimator=classifier, 
                 param_grid=params, 
                 scoring='f1_weighted', 
-                cv=5, verbose=3)
+                verbose=2,
+                cv=KFold(
+                    n_splits=5, 
+                    shuffle=True, 
+                    random_state=123), 
+                return_train_score=True, 
+                refit=True)
             
             gs.fit(x_train, y_train)
-            print(gs.best_params_)
+
             classifier = gs.best_estimator_
+            best_params = gs.best_params_
+
+            # Get cross-validation scores (averagre and std value of train/validation score)
+            validation_scores = gs.cv_results_['mean_test_score']
+            train_scores = gs.cv_results_['mean_train_score']
+
+            # Calculate the average score and standard deviation
+            avg_val_score, std_val_score = np.nanmean(validation_scores), np.nanstd(validation_scores)
+            avg_train_score, std_train_score = np.nanmean(train_scores), np.nanstd(train_scores)
+
+            print("Average training score:", avg_train_score)
+            print("Training score standard deviation:", std_train_score)
+
+            print("Average validation score:", avg_val_score)
+            print("Validation score standard deviation:", std_val_score)
+
+            scores = {
+                'Train': {
+                    'average': avg_train_score,
+                    'std': std_train_score,
+                },
+                'Validation': {
+                    'average': avg_val_score,
+                    'std': std_val_score,
+                }
+            }
         else:
             classifier.fit(x_train, y_train)
 
         # Compute predictions and their probabilities
-        pred = classifier.predict(self.X_test.values)
-        pred_prob = classifier.predict_proba(self.X_test.values)
+        y_pred = classifier.predict(self.X_test.values)
+        y_pred_prob = classifier.predict_proba(self.X_test.values)
 
         if type != 'MLARAM':
-            pred_prob = pred_prob.todense()
-            pred = pred.todense()
+            y_pred_prob = y_pred_prob.todense()
+            y_pred = y_pred.todense()
 
-        return pd.DataFrame(pred, columns=self.y_test.columns, dtype='int'), \
-            pd.DataFrame(pred_prob, columns=self.y_test.columns)
+        # Compute probability predictions and predictions
+        y_pred = pd.DataFrame(y_pred, columns=self.y_test.columns, 
+                                index=self.y_test.index, dtype='int')
+        y_pred_prob = pd.DataFrame(y_pred_prob, columns=self.y_test.columns,
+                                    index=self.y_test.index, dtype='float64')
+
+        return y_pred, y_pred_prob, classifier, best_params, scores
     
 
 class MultiLabel_EnsembleChains(MultiLabelClassification):
@@ -488,15 +605,53 @@ class MultiLabel_EnsembleChains(MultiLabelClassification):
                 additional_params[new_key] = value
 
             # Create the grid search object
-            grid_search = GridSearchCV(pipeline, param_grid=additional_params, scoring='f1_weighted', cv=5, verbose=3)
+            grid_search = GridSearchCV(
+                pipeline, 
+                param_grid=additional_params, 
+                scoring='f1_weighted', 
+                verbose=2,
+                cv=KFold(
+                    n_splits=5, 
+                    shuffle=True, 
+                    random_state=123), 
+                return_train_score=True, 
+                refit=True)
 
             # Fit the grid search to the data
-            grid_search.fit(self.X_train, self.y_train)
+            grid_search.fit(self.X_train.values, self.y_train.values)
+            # if isinstance(model, RandomForestClassifier):
+            #     grid_search.fit(self.X_train.values, self.y_train.values)
+            # else:
+            #     grid_search.fit(self.X_train, self.y_train)
 
             # Get best model
             classifier = grid_search.best_estimator_
+            best_params = grid_search.best_params_
 
-            print(grid_search.best_params_)
+            # Get cross-validation scores (averagre and std value of train/validation score)
+            validation_scores = grid_search.cv_results_['mean_test_score']
+            train_scores = grid_search.cv_results_['mean_train_score']
+
+            # Calculate the average score and standard deviation
+            avg_val_score, std_val_score = np.nanmean(validation_scores), np.nanstd(validation_scores)
+            avg_train_score, std_train_score = np.nanmean(train_scores), np.nanstd(train_scores)
+
+            print("Average training score:", avg_train_score)
+            print("Training score standard deviation:", std_train_score)
+
+            print("Average validation score:", avg_val_score)
+            print("Validation score standard deviation:", std_val_score)
+
+            scores = {
+                'Train': {
+                    'average': avg_train_score,
+                    'std': std_train_score,
+                },
+                'Validation': {
+                    'average': avg_val_score,
+                    'std': std_val_score,
+                }
+            }
 
             now = datetime.datetime.now().strftime("%d-%m-%Y_%H:%M:%S")
             with open('bestmodel_ECC_' + now + '.pkl', 'wb') as file:
@@ -511,18 +666,16 @@ class MultiLabel_EnsembleChains(MultiLabelClassification):
             classifier.fit(self.X_train, self.y_train)
 
         # Compute probability predictions and predictions
-        pred = classifier.predict(self.X_test)
-        pred_prob = np.array([arr[:, 1] for arr in classifier.predict_proba(self.X_test)]).T
-        
-        # # Compute probability predictions for each chain and average them
-        # y_pred_chains = np.array([chain.predict_proba(self.X_test) for chain in chains])
-        # y_pred_ensemble = y_pred_chains.mean(axis=0)
+        y_pred = classifier.predict(self.X_test)
+        y_pred_prob = classifier.predict_proba(self.X_test)
+        y_pred_prob = normalize(np.array([y_pred_prob[i][:, 1] for i in range(5)]).transpose(), axis=1, norm='l1')
+        # y_pred_prob = np.array([arr[:, 1] for arr in classifier.predict_proba(self.X_test)]).T
 
-        # # Take average probability predictions and compute average predictions
-        # y_pred = (y_pred_ensemble > 0.5).astype('int')
+        # Compute probability predictions and predictions
+        y_pred = pd.DataFrame(y_pred, columns=self.y_test.columns, dtype='int')
+        y_pred_prob = pd.DataFrame(y_pred_prob, columns=self.y_test.columns)
 
-        return pd.DataFrame(pred, columns=self.y_test.columns, dtype='int'),\
-              pd.DataFrame(pred_prob, columns=self.y_test.columns)
+        return y_pred, y_pred_prob, classifier, best_params, scores
     
 class MultiLabel_EnsembleRakel(MultiLabelClassification):
 
@@ -571,15 +724,53 @@ class MultiLabel_EnsembleRakel(MultiLabelClassification):
                 additional_params[new_key] = value
 
             # Create the grid search object
-            grid_search = GridSearchCV(classifier, param_grid=additional_params, scoring='f1_weighted', cv=5, verbose=1)
+            grid_search = GridSearchCV(
+                classifier, 
+                param_grid=additional_params, 
+                scoring='f1_weighted', 
+                verbose=2,
+                cv=KFold(
+                    n_splits=5, 
+                    shuffle=True, 
+                    random_state=123), 
+                return_train_score=True, 
+                refit=True)
 
             # Fit the grid search to the data
-            grid_search.fit(self.X_train, self.y_train)
+            grid_search.fit(self.X_train.values, self.y_train.values)
+            # if isinstance(model, RandomForestClassifier):
+            #     grid_search.fit(self.X_train.values, self.y_train.values)
+            # else:
+            #     grid_search.fit(self.X_train, self.y_train)
 
             # Get best model
             classifier = grid_search.best_estimator_
+            best_params = grid_search.best_params_
 
-            print(grid_search.best_params_)
+            # Get cross-validation scores (averagre and std value of train/validation score)
+            validation_scores = grid_search.cv_results_['mean_test_score']
+            train_scores = grid_search.cv_results_['mean_train_score']
+
+            # Calculate the average score and standard deviation
+            avg_val_score, std_val_score = np.nanmean(validation_scores), np.nanstd(validation_scores)
+            avg_train_score, std_train_score = np.nanmean(train_scores), np.nanstd(train_scores)
+
+            print("Average training score:", avg_train_score)
+            print("Training score standard deviation:", std_train_score)
+
+            print("Average validation score:", avg_val_score)
+            print("Validation score standard deviation:", std_val_score)
+
+            scores = {
+                'Train': {
+                    'average': avg_train_score,
+                    'std': std_train_score,
+                },
+                'Validation': {
+                    'average': avg_val_score,
+                    'std': std_val_score,
+                }
+            }
 
             now = datetime.datetime.now().strftime("%d-%m-%Y_%H:%M:%S")
             with open('bestmodel_rakel_' + now + '.pkl', 'wb') as file:
@@ -590,8 +781,10 @@ class MultiLabel_EnsembleRakel(MultiLabelClassification):
         else:
             classifier.fit(self.X_train, self.y_train)
 
-        pred = classifier.predict(self.X_test).toarray()
-        pred_prob = classifier.predict_proba(self.X_test).toarray()
+        # Compute probability predictions and predictions
+        y_pred = classifier.predict(self.X_test).toarray()
+        y_pred = pd.DataFrame(y_pred, columns=self.y_test.columns, dtype='int')
+        y_pred_prob = classifier.predict_proba(self.X_test).toarray()
+        y_pred_prob = pd.DataFrame(y_pred_prob, columns=self.y_test.columns)
 
-        return pd.DataFrame(pred, columns=self.y_test.columns, dtype='int'),\
-              pd.DataFrame(pred_prob, columns=self.y_test.columns)
+        return y_pred, y_pred_prob, classifier, best_params, scores

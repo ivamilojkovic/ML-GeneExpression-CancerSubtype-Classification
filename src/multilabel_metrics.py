@@ -100,6 +100,11 @@ def ordered_subset_accuracy(y_test_mcut, predictions, y_test_corr, prob_predicti
     ranked_corr = y_test_corr.apply(rank_indices, axis=1)
     ranked_probs = prob_predictions.apply(rank_indices, axis=1)
 
+    # Indices as in mcuts
+    ranked_probs.index = ranked_corr.index
+    predictions.index = y_test_mcut.index
+    prob_predictions .index = y_test_mcut.index
+
     # Now multiply by mcut labels only the ranked correlations and 
     # by predictions the ranked probabilties
     ranked_corr *= y_test_mcut
@@ -114,6 +119,11 @@ def k_orders_subset_accuracy(y_test_mcut, predictions, y_test_corr, prob_predict
     ranked_corr = y_test_corr.apply(rank_indices, axis=1)
     ranked_probs = prob_predictions.apply(rank_indices, axis=1)
 
+    # Indices as in mcuts
+    ranked_probs.index = ranked_corr.index
+    predictions.index = y_test_mcut.index
+    prob_predictions .index = y_test_mcut.index
+
     # Now multiply by mcut labels only the ranked correlations and 
     # by predictions the ranked probabilties
     ranked_corr *= y_test_mcut
@@ -126,7 +136,30 @@ def k_orders_subset_accuracy(y_test_mcut, predictions, y_test_corr, prob_predict
 
     return cnt_correct_first_k_positions / y_test_mcut.shape[0]
 
-def print_all_scores(y_test, predictions, prob_predictions, label_orig, label_pam50, txt_file_name):
+def secondary_accuracy(y_test_mcut, predictions, y_test_corr, prob_predictions, k=2):
+
+    # Use y_test_corr and prediction probabilities to compute ranks
+    ranked_corr = y_test_corr.apply(rank_indices, axis=1)
+    ranked_probs = prob_predictions.apply(rank_indices, axis=1)
+
+    # Indices as in mcuts
+    ranked_probs.index = ranked_corr.index
+    predictions.index = y_test_mcut.index
+    prob_predictions .index = y_test_mcut.index
+
+    # Now multiply by mcut labels only the ranked correlations and 
+    # by predictions the ranked probabilties
+    ranked_corr *= y_test_mcut
+    ranked_probs *= predictions
+
+    # Set zero where value > k
+    ranked_corr_below_k = ranked_corr.applymap(lambda x: k if x == k else 0)
+    ranked_probs_below_k = ranked_probs.applymap(lambda x: k if x == k else 0)
+    cnt_correct_first_k_positions = (ranked_corr_below_k == ranked_probs_below_k).all(axis=1).sum()
+
+    return cnt_correct_first_k_positions / y_test_mcut.shape[0]
+
+def print_all_scores(y_test, predictions, prob_predictions, label_orig, label_pam50, txt_file_name=None, y_corr=None):
 
     # Compute scores on test set
     subset_acc = accuracy_score(y_test, predictions)
@@ -178,32 +211,57 @@ def print_all_scores(y_test, predictions, prob_predictions, label_orig, label_pa
     print('Test recall (micro): {}'.format(rec_micro))
     print('Test f1 score (micro): {}\n'.format(f1_micro))
 
-    
-    with open(txt_file_name, 'w') as file:
+    # Additional metrics
+    # semi = semi_relaxed_accuracy(y_prob_pred=prob_predictions, y_true=y_test)
+    ordered = ordered_subset_accuracy(y_test_corr=y_corr, y_test_mcut=y_test, 
+                                      predictions=predictions, prob_predictions=prob_predictions)
 
-        file.write('--- Test scores ---\n')
-        file.write(f'Subset accuracy: {subset_acc}\n')
-        file.write(f'Relaxed (PAM50) accuracy: {relax_pam50_acc}\n')
-        file.write(f'Relaxed (original) accuracy: {relax_orig_acc}\n')
-        file.write(f'Partial accuracy: {partial_acc}\n')
-        file.write(f'Hamming loss: {hamm_loss}\n')
-        file.write(f'Ranking average precision: {rank_avg_prec}\n')
-        file.write(f'Average precision: {avg_prec}\n\n')
+    # print('Semi-relexed: {}'.format(semi))
+    print('Ordered subset acc: {}'.format(ordered))
+    ord_accs = []
+    for order in [1, 2, 3]:
+        k_ordered = k_orders_subset_accuracy(y_test_mcut=y_test, predictions=predictions, 
+                                            y_test_corr=y_corr, prob_predictions=prob_predictions, k=order)
+        ord_accs.append(k_ordered)
+        print('Order {} accuracy: {}'.format(order, k_ordered))
 
-        file.write(' - Weighted scores -\n')
-        file.write(f'Precision: {prec_weighted}\n')
-        file.write(f'Recall: {rec_weighted}\n')
-        file.write(f'F1 score: {f1_weighted}\n\n')
+    sec_acc = secondary_accuracy(y_test_mcut=y_test, predictions=predictions, 
+                                            y_test_corr=y_corr, prob_predictions=prob_predictions, k=2)
+    print('\nSecondary accuracy: ', sec_acc)
 
-        file.write(' - Macro scores -\n')
-        file.write(f'Precision: {prec_macro}\n')
-        file.write(f'Recall: {rec_macro}\n')
-        file.write(f'F1 score: {f1_macro}\n\n')
+    if txt_file_name != None:
+        with open(txt_file_name, 'w') as file:
 
-        file.write(' - Micro scores -\n')
-        file.write(f'Precision: {prec_micro}\n')
-        file.write(f'Recall: {rec_micro}\n')
-        file.write(f'F1 score: {f1_micro}\n\n')
+            file.write('--- Test scores ---\n')
+            file.write(f'Subset accuracy: {subset_acc}\n')
+            file.write(f'Relaxed (PAM50) accuracy: {relax_pam50_acc}\n')
+            file.write(f'Relaxed (original) accuracy: {relax_orig_acc}\n')
+            file.write(f'Partial accuracy: {partial_acc}\n')
+            file.write(f'Hamming loss: {hamm_loss}\n')
+            file.write(f'Ranking average precision: {rank_avg_prec}\n')
+            file.write(f'Average precision: {avg_prec}\n\n')
+
+            file.write(' - Weighted scores -\n')
+            file.write(f'Precision: {prec_weighted}\n')
+            file.write(f'Recall: {rec_weighted}\n')
+            file.write(f'F1 score: {f1_weighted}\n\n')
+
+            file.write(' - Macro scores -\n')
+            file.write(f'Precision: {prec_macro}\n')
+            file.write(f'Recall: {rec_macro}\n')
+            file.write(f'F1 score: {f1_macro}\n\n')
+
+            file.write(' - Micro scores -\n')
+            file.write(f'Precision: {prec_micro}\n')
+            file.write(f'Recall: {rec_micro}\n')
+            file.write(f'F1 score: {f1_micro}\n\n')
+
+            file.write(' - Additional scores -\n')
+            file.write(f'Ordered subset accuracy: {ordered}\n')
+            file.write(f'Primary accuracy: {ord_accs[0]}\n')
+            file.write(f'Secondary accuracy: {sec_acc}\n')
+            file.write(f'Both accuracy: {ord_accs[1]}\n\n')
+
 
 
 

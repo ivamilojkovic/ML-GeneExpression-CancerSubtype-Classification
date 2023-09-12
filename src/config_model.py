@@ -85,7 +85,7 @@ MULTILABEL_MODEL_PARAMS = {
         'booster': ['gbtree'],
         'learning_rate': [0.1, 0.01, 0.05],
         'n_estimators': [50, 100],
-        'reg_alpha': [0], 
+        'reg_alpha': [0, 0.5, 1], 
         'reg_lambda': [0, 1, 10],
         'gamma': [0, 0.25, 1],
         'subsample': [0.8],
@@ -103,6 +103,8 @@ MULTILABEL_MODEL_PARAMS = {
         'n_estimators':[50, 100, 150], 
         'criterion': ['gini', 'entropy', 'log_loss'], 
         'min_samples_split': [2, 3, 4, 5], 
-        'min_samples_leaf': [1, 2, 3]
+        'min_samples_leaf': [1, 2, 3],
+        'max_features': ['sqrt']
     }
 }
+

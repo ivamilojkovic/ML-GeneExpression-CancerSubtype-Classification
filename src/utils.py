@@ -62,6 +62,53 @@ def m_cut_strategy_class_assignment(
 
     return pd.DataFrame(assigned_labels, columns=data.columns), threshs
 
+def create_mcut_nth_percentile_labels(
+        m_cut_labels, 
+        correlations, 
+        y, 
+        keep_primary: bool = False, 
+        N: int = 5):
+
+    """ If a label-specific correlation is below the 5th percentile,
+        set the m-cut_label to 0 if it was 1 previously. This scenario 
+        can create samples that do not have any label assigned, compared 
+        to m-cut strategy, where at least one label need to be assigned.
+    """
+
+    # Create a copy of m_cut_labels that's going to be modified
+    m_cut_labels_2 = m_cut_labels.copy(deep=True)
+    threshs = []
+
+    for i, label in enumerate(correlations.columns):
+
+        # Find indices where label is located in y (PAM50 label with max correlation)
+        pam50_label_idx = y != label
+
+        # Compute the 5th percentile
+        # label_thresh = np.percentile(
+        #     correlations[label][pam50_label_idx], N)
+        label_thresh = np.percentile(correlations[label][pam50_label_idx][m_cut_labels[label][pam50_label_idx]==1], N)
+        threshs.append(label_thresh)
+        
+        # Set 0 where the correlation is below the threshold
+        lower_than_thresh = (correlations.loc[pam50_label_idx, label] < label_thresh)
+        lower_than_thresh_idx = lower_than_thresh[lower_than_thresh].index
+
+        # Keep the primary labels (if said) where the primary label is the only one that was assigned to a sample
+        if keep_primary:
+            more_than_one_assigned = m_cut_labels.iloc[lower_than_thresh_idx, :].sum(axis=1)>1
+            more_than_one_assigned_idx = more_than_one_assigned[more_than_one_assigned].index
+            indices = more_than_one_assigned_idx
+        else:
+            indices = lower_than_thresh_idx
+
+        # Set zeros where the percentile is below and (if selected) primary label is kept
+        m_cut_labels_2.loc[indices, label] = 0
+        # pam50_notlabel_idx = y != label
+        # m_cut_labels_2.loc[lower_than_thresh & pam50_notlabel_idx, label] = 0
+
+    return m_cut_labels_2, pd.Series(threshs, index=correlations.columns)
+
 def rank_indices(row):
     return row.rank(ascending=False).astype(int)
         
@@ -78,14 +125,14 @@ def plot_class_distribution_comparison(data, y_mcut_labels, y_5perc_labels,
             'Multiple labels M-cut & 10th percentile strategy (non-negative correlations)': y_10perc_labels.sum(axis=0),
             'Multiple labels M-cut & 25th percentile strategy (non-negative correlations)': y_25perc_labels.sum(axis=0)
             }, 
-            index=['LumA', 'LumB',	'Basal', 'Her2', 'Normal'])
+            index=y_mcut_labels.columns)
     else:
          df_compare = pd.DataFrame({
             'Single label assigned by PAM50 maximum correlation': data['Subtype-from Parker centroids'].value_counts(),
             'Multiple labels M-cut strategy (non-negative correlations)': y_mcut_labels.sum(axis=0),
             'Multiple labels M-cut & 5th percentile strategy (non-negative correlations)': y_5perc_labels.sum(axis=0),
             }, 
-            index=['LumA', 'LumB',	'Basal', 'Her2', 'Normal'])
+            index=[y_mcut_labels.columns])
          
     ax = df_compare.plot(kind='bar', rot=30, title='Class distribution comparison', width=0.7)
     for g in ax.patches:
@@ -340,47 +387,7 @@ def plot_stacked_bars_primary_secondary_label_assigned(y, y_mcut_labels, y_5perc
     return ax
 
 
-def create_mcut_nth_percentile_labels(
-        m_cut_labels, 
-        correlations, 
-        y, 
-        keep_primary: bool = False, 
-        N: int = 5):
 
-    """ If a label-specific correlation is below the 5th percentile,
-        set the m-cut_label to 0 if it was 1 previously. This scenario 
-        can create samples that do not have any label assigned, compared 
-        to m-cut strategy, where at least one label need to be assigned.
-    """
-
-    # Create a copy of m_cut_labels that's going to be modified
-    m_cut_labels_2 = m_cut_labels.copy(deep=True)
-
-    for i, label in enumerate(correlations.columns):
-
-        # Find indices where label is located in y (PAM50 label with max correlation)
-        pam50_label_idx = y == label
-
-        # Compute the 5th percentile
-        label_thresh = np.percentile(
-            correlations[label][pam50_label_idx], N)
-        
-        # Set 0 where the correlation is below the threshold
-        lower_than_thresh = (correlations.loc[pam50_label_idx, label] < label_thresh)
-        lower_than_thresh_idx = lower_than_thresh[lower_than_thresh].index
-
-        # Keep the primary labels (if said) where the primary label is the only one that was assigned to a sample
-        if keep_primary:
-            more_than_one_assigned = m_cut_labels.iloc[lower_than_thresh_idx, :].sum(axis=1)>1
-            more_than_one_assigned_idx = more_than_one_assigned[more_than_one_assigned].index
-            indices = more_than_one_assigned_idx
-        else:
-            indices = lower_than_thresh_idx
-
-        # Set zeros where the percentile is below and (if selected) primary label is kept
-        m_cut_labels_2.loc[indices, label] = 0
-
-    return m_cut_labels_2
 
 def check_dim(model, x_check=None):
     # Check model dimensions

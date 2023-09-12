@@ -4,20 +4,20 @@
 
 train:
   solve_class_imbalance: False # Not solving CI problem corresponds  to case0
-  type_class_imbalance: 'case1' # ['case1', 'case2', 'case3', 'case4']
-  thresh_lumA: 200 # [case1a -> 200, case1b -> 225, case1c -> 250, 175]
+  type_class_imbalance: 'None' # ['None', 'case1', 'case2', 'case3', 'case4']
+  thresh_lumA: None # [None, case1a -> 200, case1b -> 225, case1c -> 250, 175]
   cross_val: False
   test_size: 0.3
   random_state: 4
   random_state_split: 1
-  optim: True
-  grid_scoring: 'accuracy'
+  optim: False
+  grid_scoring: 'accuracy' # 'f1_weighted'
   downsample_test: False
   num_folds: 10
-  num_feat: 500
+  num_feat: 40 # Cris-40, Brca-50
   type_feat_selection: 'hybrid' # ['univariate', 'wrapper', 'embedded', 'hybrid']
-  use_multilabel_dataset: True
-  brca_cris: 'BRCA' 
+  use_multilabel_dataset: True # True - PAM50, False - Original
+  brca_cris: 'CRIS' # 'BRCA', 'CRIS'
 
 paths:
   data: ${hydra:runtime.cwd}/data
