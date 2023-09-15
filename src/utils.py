@@ -69,10 +69,8 @@ def create_mcut_nth_percentile_labels(
         keep_primary: bool = False, 
         N: int = 5):
 
-    """ If a label-specific correlation is below the 5th percentile,
-        set the m-cut_label to 0 if it was 1 previously. This scenario 
-        can create samples that do not have any label assigned, compared 
-        to m-cut strategy, where at least one label need to be assigned.
+    """ If a secondary label correlation is below the 5th percentile,
+        set the m-cut_label to 0 if it was 1 previously. 
     """
 
     # Create a copy of m_cut_labels that's going to be modified
@@ -81,12 +79,14 @@ def create_mcut_nth_percentile_labels(
 
     for i, label in enumerate(correlations.columns):
 
-        # Find indices where label is located in y (PAM50 label with max correlation)
+        # Find indices of samples not labeled as the current subtype (label)
         pam50_label_idx = y != label
 
         # Compute the 5th percentile
         # label_thresh = np.percentile(
         #     correlations[label][pam50_label_idx], N)
+
+        # Compute the 5th percentile of secondary labels
         label_thresh = np.percentile(correlations[label][pam50_label_idx][m_cut_labels[label][pam50_label_idx]==1], N)
         threshs.append(label_thresh)
         
@@ -102,8 +102,9 @@ def create_mcut_nth_percentile_labels(
         else:
             indices = lower_than_thresh_idx
 
-        # Set zeros where the percentile is below and (if selected) primary label is kept
+        # Set zeros where the percentile is below
         m_cut_labels_2.loc[indices, label] = 0
+
         # pam50_notlabel_idx = y != label
         # m_cut_labels_2.loc[lower_than_thresh & pam50_notlabel_idx, label] = 0
 
